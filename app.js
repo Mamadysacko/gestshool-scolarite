@@ -1,5 +1,5 @@
 import { DEFAULT_STATE, loadState, saveState, exportStateToFile, importStateFromFile, resetData } from './storage.js';
-import { renderDashboard, renderAnnees, renderClasses, renderEleves, renderInscriptions, renderTarifs, renderPaiements, renderRapports, renderConfig, showToast, showStudentProfile, printPaymentReceipt, exportPaymentsCsv, exportReportCsv, exportStudentsCsv, printReport } from './ui.js';
+import { renderDashboard, renderAnnees, renderClasses, renderEleves, renderInscriptions, renderTarifs, renderPaiements, renderRapports, renderConfig, showToast, showStudentProfile, printPaymentReceipt, exportPaymentsCsv, exportReportCsv, exportStudentsCsv, printReport, printPeriodReport, exportPeriodReportCsv } from './ui.js';
 import { createAnnee, updateAnneeStatus, deleteAnnee, setAnneeActive, getAnneeActive } from './modules/annees.js';
 import { createClasse, updateClasse, deleteClasse } from './modules/classes.js';
 import { createEleve, updateEleve, toggleEleveState, deleteEleve } from './modules/eleves.js';
@@ -11,7 +11,8 @@ const appState = loadState();
 const dashboardFilters = {
   yearId: Number(appState.anneeActiveId || 0),
   classId: 0,
-  category: ''
+  category: '',
+  period: 'all'
 };
 
 function renderAll() {
@@ -395,6 +396,8 @@ function wireForms() {
         }
       } else if (filter === 'class') {
         dashboardFilters.classId = Number(target.value || 0);
+      } else if (filter === 'period') {
+        dashboardFilters.period = target.value;
       }
       renderDashboard(appState, dashboardFilters);
     }
@@ -447,6 +450,24 @@ function wireForms() {
 
     if (action === 'report:print') {
       if (!printReport(appState)) showToast('Impossible d’ouvrir le rapport : autorisez les fenêtres contextuelles');
+      return;
+    }
+
+
+    if (action.startsWith('report:print-period:')) {
+      const parts = action.split(':');
+      const from = parts[3] || '';
+      const to = parts[4] || '';
+      if (!printPeriodReport(appState, from, to)) showToast('Rapport impossible');
+      return;
+    }
+
+    if (action.startsWith('report:csv-period:')) {
+      const parts = action.split(':');
+      const from = parts[3] || '';
+      const to = parts[4] || '';
+      exportPeriodReportCsv(appState, from, to);
+      showToast('Rapport CSV exporté');
       return;
     }
 

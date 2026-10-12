@@ -40,6 +40,42 @@ export function renderDashboard(state, filters = {}) {
     : Number(filters.yearId || 0);
   const classId = Number(filters.classId || 0);
   const category = filters.category || '';
+  const period = filters.period || 'all';
+
+  function getPeriodRange(p) {
+    const today = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const toISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    if (p === 'today') { const s = toISO(today); return { from: s, to: s }; }
+    if (p === 'week') {
+      const day = today.getDay() || 7;
+      const mon = new Date(today); mon.setDate(today.getDate() - day + 1);
+      const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+      return { from: toISO(mon), to: toISO(sun) };
+    }
+    if (p === 'month') {
+      const from = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-01`;
+      const last = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      return { from, to: toISO(last) };
+    }
+    if (p === 'year') {
+      return { from: `${today.getFullYear()}-01-01`, to: `${today.getFullYear()}-12-31` };
+    }
+    return { from: '', to: '' };
+  }
+
+  function getLast6Months() {
+    const months = [];
+    const shortLabels = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
+    const today = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      months.push({ key, label: shortLabels[d.getMonth()] });
+    }
+    return months;
+  }
+
   const availableClasses = state.classes.filter((classe) =>
     (!yearId || classe.anneeId === yearId) && (!category || classe.categorie === category)
   );
@@ -66,6 +102,27 @@ export function renderDashboard(state, filters = {}) {
   const totalRetards = lateInscriptionIds.size;
   const totalDu = inscriptions.reduce((sum, inscription) => sum + getInscriptionBalance(inscription).total, 0);
   const totalRestant = inscriptions.reduce((sum, inscription) => sum + getInscriptionBalance(inscription).reste, 0);
+  const tauxRecouvrement = totalDu ? Math.round(totalPaiements / totalDu * 100) : 0;
+
+  const periodRange = getPeriodRange(period);
+  const paiementsPeriode = state.paiements.filter((payment) => {
+    if (payment.annule || !scopedInscriptionIds.has(payment.inscriptionId)) return false;
+    if (periodRange.from && payment.datePaiement < periodRange.from) return false;
+    if (periodRange.to && payment.datePaiement > periodRange.to) return false;
+    return true;
+  });
+  const encaissePeriode = paiementsPeriode.reduce((sum, payment) => sum + Number(payment.montant || 0), 0);
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const paiementsAujourdhui = state.paiements.filter((payment) =>
+    !payment.annule && scopedInscriptionIds.has(payment.inscriptionId) && payment.datePaiement === todayStr
+  );
+  const echeancesDepassees = inscriptions.flatMap((inscription) =>
+    (inscription.echeances || [])
+      .filter((echeance) => ['en_retard', 'impayee'].includes(echeance.statut) && echeance.dateLimite && echeance.dateLimite < todayStr)
+      .map((echeance) => ({ inscription, echeance }))
+  ).slice(0, 5);
+
   const categories = [...new Set(state.classes
     .filter((classe) => !yearId || classe.anneeId === yearId)
     .map((classe) => classe.categorie))];
@@ -80,11 +137,31 @@ export function renderDashboard(state, filters = {}) {
     return { classe, effectif, paid, due, rate: due ? Math.round(paid / due * 100) : 0 };
   });
 
+  const parTranche = [1, 2, 3].map((trancheNum) => {
+    let du = 0; let paye = 0;
+    inscriptions.forEach((inscription) => {
+      (inscription.echeances || []).filter((e) => e.trancheId === trancheNum).forEach((e) => {
+        du += Number(e.montant || 0);
+        paye += Number(e.montantPaye || 0);
+      });
+    });
+    return { label: `Tranche ${trancheNum}`, du, paye, rate: du ? Math.round(paye / du * 100) : 0 };
+  });
+
+  const last6Months = getLast6Months();
+  const monthlyTotals = last6Months.map(({ key, label }) => {
+    const total = state.paiements
+      .filter((payment) => !payment.annule && scopedInscriptionIds.has(payment.inscriptionId) && String(payment.datePaiement || '').slice(0, 7) === key)
+      .reduce((sum, payment) => sum + Number(payment.montant || 0), 0);
+    return { label, total };
+  });
+  const maxMonthly = Math.max(...monthlyTotals.map((m) => m.total), 1);
+
   section.innerHTML = `
     <div class="panel dashboard-filter-panel">
       <div class="dashboard-heading">
-        <div><span class="eyebrow">Pilotage scolaire</span><h2>Situation de l’établissement</h2></div>
-        <div class="filter-grid">
+        <div><span class="eyebrow">Pilotage scolaire</span><h2>Situation de l'établissement</h2></div>
+        <div class="filter-grid" style="grid-template-columns:repeat(4,minmax(110px,1fr))">
           <label>Année
             <select data-dashboard-filter="year">
               <option value="" ${!yearId ? 'selected' : ''}>Toutes</option>
@@ -103,42 +180,69 @@ export function renderDashboard(state, filters = {}) {
               ${availableClasses.map((classe) => `<option value="${classe.id}" ${classe.id === classId ? 'selected' : ''}>${escapeHtml(classe.nom)}</option>`).join('')}
             </select>
           </label>
+          <label>Période
+            <select data-dashboard-filter="period">
+              <option value="all" ${period === 'all' ? 'selected' : ''}>Tout</option>
+              <option value="today" ${period === 'today' ? 'selected' : ''}>Aujourd'hui</option>
+              <option value="week" ${period === 'week' ? 'selected' : ''}>Cette semaine</option>
+              <option value="month" ${period === 'month' ? 'selected' : ''}>Ce mois</option>
+              <option value="year" ${period === 'year' ? 'selected' : ''}>Cette année</option>
+            </select>
+          </label>
         </div>
       </div>
     </div>
     <div class="stats-grid">
       <article class="stat-card accent-blue">
         <div class="icon">👥</div>
-        <div>
-          <span>Élèves inscrits</span>
-          <strong>${totalEleves}</strong>
-        </div>
+        <div><span>Élèves inscrits</span><strong>${totalEleves}</strong></div>
       </article>
       <article class="stat-card accent-purple">
         <div class="icon">🏫</div>
-        <div>
-          <span>Classes</span>
-          <strong>${totalClasses}</strong>
-        </div>
+        <div><span>Classes</span><strong>${totalClasses}</strong></div>
       </article>
       <article class="stat-card accent-gold">
         <div class="icon">📝</div>
-        <div>
-          <span>Inscriptions</span>
-          <strong>${totalInscriptions}</strong>
-        </div>
+        <div><span>Inscriptions</span><strong>${totalInscriptions}</strong></div>
       </article>
       <article class="stat-card accent-green">
         <div class="icon">💰</div>
-        <div>
-          <span>Encaissements</span>
-          <strong>${formatMoney(totalPaiements)} ${state.config.devise}</strong>
-        </div>
+        <div><span>Encaissements</span><strong>${formatMoney(totalPaiements)} ${state.config.devise}</strong></div>
       </article>
       <article class="stat-card accent-red">
         <div class="icon">⏳</div>
         <div><span>Reste à recouvrer</span><strong>${formatMoney(totalRestant)} ${state.config.devise}</strong></div>
       </article>
+      <article class="stat-card accent-purple">
+        <div class="icon">📈</div>
+        <div><span>Taux de recouvrement</span><strong>${tauxRecouvrement}%</strong></div>
+      </article>
+      <article class="stat-card accent-orange">
+        <div class="icon">🗓️</div>
+        <div><span>Encaissé (période)</span><strong>${formatMoney(encaissePeriode)} ${state.config.devise}</strong></div>
+      </article>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header"><h3>Alertes du jour</h3><span class="meta">${todayStr}</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div>
+          <h4 style="margin:0 0 8px;font-size:13px;color:#f97316">💳 Paiements du jour (${paiementsAujourdhui.length})</h4>
+          ${paiementsAujourdhui.length ? paiementsAujourdhui.slice(0, 5).map((payment) => {
+            const insc = state.inscriptions.find((i) => i.id === payment.inscriptionId);
+            const elv = insc && state.eleves.find((e) => e.id === insc.eleveId);
+            return `<div class="list-item"><div><strong>${elv ? `${elv.prenom} ${elv.nom}` : '—'}</strong><div class="meta">${payment.mode} · ${payment.reference || 'sans réf.'}</div></div><span class="badge ok">${formatMoney(payment.montant)} ${state.config.devise}</span></div>`;
+          }).join('') : '<p class="meta">Aucun paiement enregistré aujourd\'hui.</p>'}
+        </div>
+        <div>
+          <h4 style="margin:0 0 8px;font-size:13px;color:#ef4444">⚠️ Échéances dépassées (${echeancesDepassees.length})</h4>
+          ${echeancesDepassees.length ? echeancesDepassees.map(({ inscription, echeance }) => {
+            const elv = state.eleves.find((e) => e.id === inscription.eleveId);
+            const reste = Math.max(Number(echeance.montant || 0) - Number(echeance.montantPaye || 0), 0);
+            return `<div class="list-item"><div><strong>${elv ? `${elv.prenom} ${elv.nom}` : '—'}</strong><div class="meta">${getClassName(state, inscription.classeId)} · Tr.${echeance.trancheId} · limite ${echeance.dateLimite || '—'}</div></div><span class="badge warning">${formatMoney(reste)} ${state.config.devise}</span></div>`;
+          }).join('') : '<p class="meta">Aucune échéance dépassée.</p>'}
+        </div>
+      </div>
     </div>
 
     <div class="dashboard-grid">
@@ -164,14 +268,55 @@ export function renderDashboard(state, filters = {}) {
       <div class="panel">
         <div class="panel-header"><h3>Recouvrement global</h3></div>
         <div class="recovery-summary">
-          <strong>${totalDu ? Math.round(totalPaiements / totalDu * 100) : 0}%</strong>
+          <strong>${tauxRecouvrement}%</strong>
           <span>recouvré sur ${formatMoney(totalDu)} ${state.config.devise} de frais</span>
-          <div class="progress-track"><i style="width:${Math.min(totalDu ? totalPaiements / totalDu * 100 : 0, 100)}%"></i></div>
+          <div class="progress-track"><i style="width:${Math.min(tauxRecouvrement, 100)}%"></i></div>
         </div>
       </div>
     </div>
 
-    <div class="panel">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:16px">
+      <div class="panel">
+        <div class="panel-header"><h3>Paiements par tranche</h3></div>
+        <div style="display:flex;flex-direction:column;gap:12px;padding:4px 0">
+          ${parTranche.map((t) => `
+            <div>
+              <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span>${escapeHtml(t.label)}</span><span>${formatMoney(t.paye)} / ${formatMoney(t.du)} ${state.config.devise}</span></div>
+              <div class="progress-track" style="height:10px;background:#f3e8ff"><i style="width:${Math.min(t.du ? t.paye / t.du * 100 : 0, 100)}%;background:#8b5cf6;height:100%;display:block;border-radius:4px"></i></div>
+              <div style="font-size:11px;color:#8b5cf6;margin-top:2px">${t.rate}% recouvré</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><h3>Recouvrement par classe</h3></div>
+        <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0;max-height:260px;overflow-y:auto">
+          ${breakdown.length ? breakdown.map((b) => `
+            <div>
+              <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span>${escapeHtml(b.classe.nom)}</span><span>${b.rate}%</span></div>
+              <div class="progress-track" style="height:8px;background:#fed7aa"><i style="width:${Math.min(b.due ? b.paid / b.due * 100 : 0, 100)}%;background:#f97316;height:100%;display:block;border-radius:4px"></i></div>
+            </div>
+          `).join('') : '<p class="meta">Aucune classe.</p>'}
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><h3>Évolution mensuelle</h3></div>
+        <div style="display:flex;align-items:flex-end;gap:6px;height:160px;padding:4px 0 0">
+          ${monthlyTotals.map((m) => {
+            const h = Math.round(m.total / maxMonthly * 130);
+            return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+              <span style="font-size:9px;color:#6b7280;text-align:center">${formatMoney(m.total)}</span>
+              <div style="width:100%;height:${Math.max(h, 4)}px;background:#f97316;border-radius:4px 4px 0 0" title="${m.label}: ${formatMoney(m.total)} ${state.config.devise}"></div>
+              <span style="font-size:10px">${m.label}</span>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:16px">
       <div class="panel-header"><h3>Indicateurs par classe</h3><span class="meta">Effectif, encaissements et recouvrement</span></div>
       <div class="table-wrap"><table>
         <thead><tr><th>Classe</th><th>Catégorie</th><th>Effectif</th><th>Encaissé</th><th>À recouvrer</th><th>Recouvrement</th></tr></thead>
@@ -392,7 +537,7 @@ export function renderInscriptions(state) {
     </div>
 
     <div class="panel">
-      <div class="panel-header"><h3>Historique d’inscriptions</h3></div>
+      <div class="panel-header"><h3>Historique d'inscriptions</h3></div>
       <div class="table-wrap">
         <table>
           <thead>
@@ -552,6 +697,78 @@ export function renderPaiements(state) {
   `;
 }
 
+function getPeriodRange(period) {
+  const today = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const toISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  if (period === 'today') { const s = toISO(today); return { from: s, to: s }; }
+  if (period === 'week') {
+    const day = today.getDay() || 7;
+    const mon = new Date(today); mon.setDate(today.getDate() - day + 1);
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+    return { from: toISO(mon), to: toISO(sun) };
+  }
+  if (period === 'month') {
+    const from = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-01`;
+    const last = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    return { from, to: toISO(last) };
+  }
+  if (period === 'year') {
+    return { from: `${today.getFullYear()}-01-01`, to: `${today.getFullYear()}-12-31` };
+  }
+  return { from: '', to: '' };
+}
+
+function filterPaymentsByRange(state, from, to) {
+  return state.paiements.filter((payment) => {
+    if (payment.annule) return false;
+    if (from && payment.datePaiement < from) return false;
+    if (to && payment.datePaiement > to) return false;
+    return true;
+  });
+}
+
+function renderPeriodSection(state, label, sectionId, from, to) {
+  const payments = filterPaymentsByRange(state, from, to);
+  const total = payments.reduce((sum, p) => sum + Number(p.montant || 0), 0);
+  const fromAttr = escapeHtml(from || '');
+  const toAttr = escapeHtml(to || '');
+  return `
+    <details class="panel" open>
+      <summary class="panel-header" style="cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center">
+        <h3>${escapeHtml(label)}</h3>
+        <span class="badge ok">${payments.length} paiement(s) · ${formatMoney(total)} ${state.config.devise}</span>
+      </summary>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Élève</th><th>Matricule</th><th>Classe</th><th>Tranche</th><th>Montant</th><th>Mode</th><th>Date</th></tr></thead>
+          <tbody>
+            ${payments.length ? payments.map((payment) => {
+              const insc = state.inscriptions.find((i) => i.id === payment.inscriptionId);
+              const elv = insc && state.eleves.find((e) => e.id === insc.eleveId);
+              const ech = insc?.echeances?.find((e) => e.id === payment.echeanceId);
+              return `<tr>
+                <td>${elv ? escapeHtml(elv.prenom + ' ' + elv.nom) : '—'}</td>
+                <td>${escapeHtml(elv?.matricule || '—')}</td>
+                <td>${escapeHtml(getClassName(state, insc?.classeId))}</td>
+                <td>${escapeHtml(ech?.libelle || (ech ? 'Tranche ' + ech.trancheId : '—'))}</td>
+                <td>${formatMoney(payment.montant)} ${state.config.devise}</td>
+                <td>${escapeHtml(payment.mode || '—')}</td>
+                <td>${escapeHtml(payment.datePaiement || '—')}</td>
+              </tr>`;
+            }).join('') : '<tr><td colspan="7">Aucun paiement sur cette période.</td></tr>'}
+          </tbody>
+          ${payments.length ? `<tfoot><tr><td colspan="4" style="font-weight:bold">Total</td><td style="font-weight:bold">${formatMoney(total)} ${state.config.devise}</td><td colspan="2"></td></tr></tfoot>` : ''}
+        </table>
+      </div>
+      <div class="form-actions" style="padding:8px 0 4px">
+        <button class="primary-btn small-btn" data-action="report:print-period:${sectionId}:${fromAttr}:${toAttr}">Imprimer ce rapport</button>
+        <button class="secondary-btn small-btn" data-action="report:csv-period:${sectionId}:${fromAttr}:${toAttr}">Exporter CSV</button>
+      </div>
+    </details>
+  `;
+}
+
 export function renderRapports(state) {
   const section = document.getElementById('rapports');
   const totalEncaisse = state.paiements.filter((p) => !p.annule).reduce((sum, p) => sum + Number(p.montant || 0), 0);
@@ -569,6 +786,11 @@ export function renderRapports(state) {
   const totalDu = state.inscriptions.reduce((sum, inscription) => sum + getInscriptionBalance(inscription).total, 0);
   const rate = totalDu ? Math.round(totalEncaisse / totalDu * 100) : 0;
 
+  const todayRange = getPeriodRange('today');
+  const weekRange = getPeriodRange('week');
+  const monthRange = getPeriodRange('month');
+  const yearRange = getPeriodRange('year');
+
   section.innerHTML = `
     <div class="page-intro">
       <div><span class="eyebrow">Analyses</span><h2>Rapports de scolarité</h2></div>
@@ -583,6 +805,11 @@ export function renderRapports(state) {
       <article class="stat-card accent-purple"><div class="icon">📈</div><div><span>Inscriptions</span><strong>${state.inscriptions.length}</strong></div></article>
       <article class="stat-card accent-gold"><div class="icon">📊</div><div><span>Taux de recouvrement</span><strong>${rate}%</strong></div></article>
     </div>
+
+    ${renderPeriodSection(state, 'Rapport du jour', 'jour', todayRange.from, todayRange.to)}
+    ${renderPeriodSection(state, 'Rapport de la semaine', 'semaine', weekRange.from, weekRange.to)}
+    ${renderPeriodSection(state, 'Rapport du mois', 'mois', monthRange.from, monthRange.to)}
+    ${renderPeriodSection(state, 'Rapport de l\'année', 'annee', yearRange.from, yearRange.to)}
 
     <div class="panel">
       <div class="panel-header"><h3>Échéances à régulariser</h3><span class="meta">Montant restant par échéance</span></div>
@@ -714,6 +941,63 @@ export function exportReportCsv(state) {
   downloadCsv('rapport-scolarite.csv', rows);
 }
 
+export function printPeriodReport(state, from, to) {
+  const payments = filterPaymentsByRange(state, from, to);
+  const total = payments.reduce((sum, p) => sum + Number(p.montant || 0), 0);
+  const label = from === to ? `Rapport du ${from}` : `Rapport du ${from || '…'} au ${to || '…'}`;
+  const rows = payments.map((payment) => {
+    const insc = state.inscriptions.find((i) => i.id === payment.inscriptionId);
+    const elv = insc && state.eleves.find((e) => e.id === insc.eleveId);
+    const ech = insc?.echeances?.find((e) => e.id === payment.echeanceId);
+    return `<tr>
+      <td>${escapeHtml(payment.datePaiement || '—')}</td>
+      <td>${escapeHtml(elv?.matricule || '—')}</td>
+      <td>${elv ? escapeHtml(elv.prenom + ' ' + elv.nom) : '—'}</td>
+      <td>${escapeHtml(getClassName(state, insc?.classeId))}</td>
+      <td>${escapeHtml(ech?.libelle || (ech ? 'Tranche ' + ech.trancheId : '—'))}</td>
+      <td>${formatMoney(payment.montant)} ${escapeHtml(state.config.devise)}</td>
+      <td>${escapeHtml(payment.mode || '—')}</td>
+    </tr>`;
+  });
+  const content = `
+    <header class="brand">
+      <div><h1>${escapeHtml(state.config.nom)}</h1><p>${escapeHtml(state.config.adresse || '')} · ${escapeHtml(state.config.telephone || '')}</p></div>
+      <div><strong>${escapeHtml(label)}</strong><p>Généré le ${new Date().toLocaleDateString('fr-FR')}</p></div>
+    </header>
+    <div class="summary">
+      <div><small>Paiements</small><div class="amount">${payments.length}</div></div>
+      <div><small>Total encaissé</small><div class="amount">${formatMoney(total)} ${escapeHtml(state.config.devise)}</div></div>
+    </div>
+    <table>
+      <thead><tr><th>Date</th><th>Matricule</th><th>Élève</th><th>Classe</th><th>Tranche</th><th>Montant</th><th>Mode</th></tr></thead>
+      <tbody>${rows.join('') || '<tr><td colspan="7">Aucun paiement sur cette période.</td></tr>'}</tbody>
+      ${payments.length ? `<tfoot><tr><td colspan="5"><strong>Total</strong></td><td><strong>${formatMoney(total)} ${escapeHtml(state.config.devise)}</strong></td><td></td></tr></tfoot>` : ''}
+    </table>`;
+  return openPrintWindow(label, content);
+}
+
+export function exportPeriodReportCsv(state, from, to) {
+  const payments = filterPaymentsByRange(state, from, to);
+  const label = from === to ? `rapport-${from}` : `rapport-${from || 'debut'}-au-${to || 'fin'}`;
+  const rows = [['Date', 'Matricule', 'Élève', 'Classe', 'Tranche', 'Montant', 'Mode', 'Référence']];
+  payments.forEach((payment) => {
+    const insc = state.inscriptions.find((i) => i.id === payment.inscriptionId);
+    const elv = insc && state.eleves.find((e) => e.id === insc.eleveId);
+    const ech = insc?.echeances?.find((e) => e.id === payment.echeanceId);
+    rows.push([
+      payment.datePaiement || '',
+      elv?.matricule || '',
+      elv ? `${elv.prenom} ${elv.nom}` : '',
+      getClassName(state, insc?.classeId),
+      ech?.libelle || (ech ? `Tranche ${ech.trancheId}` : ''),
+      payment.montant,
+      payment.mode || '',
+      payment.reference || ''
+    ]);
+  });
+  downloadCsv(`${label}.csv`, rows);
+}
+
 export function showStudentProfile(state, studentId) {
   const student = state.eleves.find((item) => item.id === Number(studentId));
   const modalRoot = document.getElementById('modal-root');
@@ -794,7 +1078,7 @@ export function showStudentProfile(state, studentId) {
         <div class="profile-section">
           <h3>Historique complet</h3>
           <div class="table-wrap"><table><thead><tr><th>Date</th><th>Opération</th><th>Détail</th><th>Montant</th><th>Statut</th></tr></thead>
-            <tbody>${history.map((item) => `<tr><td>${escapeHtml(item.date || '—')}</td><td>${escapeHtml(item.type)}</td><td>${escapeHtml(item.detail)}</td><td>${escapeHtml(item.amount)}</td><td>${escapeHtml(item.status)}</td></tr>`).join('') || '<tr><td colspan="5">Aucun événement dans l’historique.</td></tr>'}</tbody>
+            <tbody>${history.map((item) => `<tr><td>${escapeHtml(item.date || '—')}</td><td>${escapeHtml(item.type)}</td><td>${escapeHtml(item.detail)}</td><td>${escapeHtml(item.amount)}</td><td>${escapeHtml(item.status)}</td></tr>`).join('') || '<tr><td colspan="5">Aucun événement dans l\'historique.</td></tr>'}</tbody>
           </table></div>
         </div>
       </section>
@@ -818,6 +1102,7 @@ function openPrintWindow(title, content) {
       #print-root th,#print-root td{text-align:left;border-bottom:1px solid #d8deea;padding:9px 7px}
       #print-root th{background:#f2f4fa;font-size:11px;text-transform:uppercase}
       #print-root .amount{font-size:22px;font-weight:bold}
+      #print-root .highlight{background:#fffbeb}
       @media print{#print-root .print-document{padding:12mm}}
     </style>${content}</div>`;
   window.print();
@@ -831,15 +1116,58 @@ export function printPaymentReceipt(state, paymentId) {
   const student = inscription && state.eleves.find((item) => item.id === inscription.eleveId);
   const echeance = inscription?.echeances?.find((item) => item.id === payment.echeanceId);
   const year = state.annees.find((item) => item.id === inscription?.anneeId);
+
+  const resteEcheance = echeance ? Math.max(Number(echeance.montant || 0) - Number(echeance.montantPaye || 0), 0) : 0;
+  const totalAnnuel = inscription ? getInscriptionBalance(inscription).total : 0;
+  const totalPayeAnnee = state.paiements
+    .filter((p) => !p.annule && p.inscriptionId === inscription?.id)
+    .reduce((sum, p) => sum + Number(p.montant || 0), 0);
+  const resteAnnee = Math.max(totalAnnuel - totalPayeAnnee, 0);
+  const historiquePaiements = state.paiements
+    .filter((p) => p.inscriptionId === inscription?.id)
+    .sort((a, b) => String(a.datePaiement).localeCompare(String(b.datePaiement)));
+
   const content = `
-    <header class="brand"><div><h1>${escapeHtml(state.config.nom)}</h1><p>${escapeHtml(state.config.adresse || '')} · ${escapeHtml(state.config.telephone || '')}</p></div>
-      <div><strong>REÇU DE PAIEMENT</strong><p>N° ${escapeHtml(payment.reference || payment.id)}</p></div></header>
-    <p>Reçu de : <strong>${escapeHtml(student ? `${student.prenom} ${student.nom}` : 'Élève')}</strong> — ${escapeHtml(student?.matricule || '')}</p>
-    <p>Année / classe : ${escapeHtml(year?.annee || '—')} / ${escapeHtml(getClassName(state, inscription?.classeId))}</p>
-    <p>Motif : ${escapeHtml(echeance?.libelle || `Tranche ${echeance?.trancheId || ''}`)}</p>
-    <div class="summary"><div><small>Montant reçu</small><div class="amount">${formatMoney(payment.montant)} ${escapeHtml(state.config.devise)}</div></div>
-      <div><small>Date</small><div>${escapeHtml(payment.datePaiement || '—')}</div></div><div><small>Mode</small><div>${escapeHtml(payment.mode || '—')}</div></div></div>
+    <header class="brand">
+      <div>
+        <h1>${escapeHtml(state.config.nom)}</h1>
+        <p>${escapeHtml(state.config.adresse || '')} · ${escapeHtml(state.config.telephone || '')}</p>
+        ${state.config.email ? `<p>${escapeHtml(state.config.email)}</p>` : ''}
+      </div>
+      <div style="text-align:right">
+        <strong>REÇU DE PAIEMENT</strong>
+        <p>N° ${escapeHtml(payment.reference || String(payment.id))}</p>
+        <p>Année scolaire : ${escapeHtml(year?.annee || '—')}</p>
+      </div>
+    </header>
+    <p>Reçu de : <strong>${escapeHtml(student ? `${student.prenom} ${student.nom}` : 'Élève')}</strong> — Matricule : ${escapeHtml(student?.matricule || '—')}</p>
+    <p>Classe : ${escapeHtml(getClassName(state, inscription?.classeId))} · Motif : ${escapeHtml(echeance?.libelle || `Tranche ${echeance?.trancheId || ''}`)}</p>
+    <div class="summary">
+      <div><small>Montant reçu</small><div class="amount">${formatMoney(payment.montant)} ${escapeHtml(state.config.devise)}</div></div>
+      <div><small>Date</small><div>${escapeHtml(payment.datePaiement || '—')}</div></div>
+      <div><small>Mode</small><div>${escapeHtml(payment.mode || '—')}</div></div>
+      <div><small>Reste tranche</small><div class="amount" style="color:#ef4444">${formatMoney(resteEcheance)} ${escapeHtml(state.config.devise)}</div></div>
+      <div><small>Reste annuel</small><div class="amount" style="color:#f97316">${formatMoney(resteAnnee)} ${escapeHtml(state.config.devise)}</div></div>
+    </div>
     <p>Caissier : ${escapeHtml(payment.caissier || '—')} · Référence : ${escapeHtml(payment.reference || '—')}</p>
+    <h2 style="margin-top:20px">Historique des paiements</h2>
+    <table>
+      <thead><tr><th>Date</th><th>Tranche</th><th>Montant</th><th>Mode</th><th>Référence</th><th>État</th></tr></thead>
+      <tbody>
+        ${historiquePaiements.map((p) => {
+          const ech = inscription?.echeances?.find((e) => e.id === p.echeanceId);
+          const isCurrent = p.id === payment.id;
+          return `<tr class="${isCurrent ? 'highlight' : ''}">
+            <td>${escapeHtml(p.datePaiement || '—')}</td>
+            <td>${escapeHtml(ech?.libelle || (ech ? 'Tranche ' + ech.trancheId : '—'))}</td>
+            <td>${formatMoney(p.montant)} ${escapeHtml(state.config.devise)}</td>
+            <td>${escapeHtml(p.mode || '—')}</td>
+            <td>${escapeHtml(p.reference || '—')}</td>
+            <td>${p.annule ? 'Annulé' : 'Validé'}</td>
+          </tr>`;
+        }).join('') || '<tr><td colspan="6">Aucun historique.</td></tr>'}
+      </tbody>
+    </table>
     <p style="margin-top:60px">Signature et cachet : ______________________________</p>`;
   return openPrintWindow('Reçu de paiement', content);
 }
@@ -866,7 +1194,7 @@ export function renderConfig(state) {
   const section = document.getElementById('config');
   section.innerHTML = `
     <div class="panel section-form">
-      <div class="panel-header"><h3>Configuration de l’école</h3></div>
+      <div class="panel-header"><h3>Configuration de l'école</h3></div>
       <form class="form-grid compact" data-form="config">
         <label>Nom <input name="nom" type="text" value="${state.config.nom || ''}" /></label>
         <label>Sigle <input name="sigle" type="text" value="${state.config.sigle || ''}" /></label>
