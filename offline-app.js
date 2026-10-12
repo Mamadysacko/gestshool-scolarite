@@ -152,6 +152,54 @@
       });
     }
     
+    function getClassNameLocal(classId) {
+      return appState.classes.find((c) => c.id === Number(classId))?.nom || '—';
+    }
+    
+    function handleMatriculeSearch(query) {
+      const inscriptionSelect = document.querySelector('form[data-form="paiement"] [name="inscriptionId"]');
+      if (!inscriptionSelect) return;
+      if (!query) {
+        inscriptionSelect.replaceChildren();
+        appState.inscriptions.forEach((inscription) => {
+          const eleve = appState.eleves.find((e) => e.id === inscription.eleveId) || {};
+          const name = eleve.prenom ? (eleve.prenom + ' ' + eleve.nom) : '—';
+          const annee = (appState.annees.find((a) => a.id === inscription.anneeId) || {}).annee || '—';
+          const option = document.createElement('option');
+          option.value = String(inscription.id);
+          option.textContent = name + ' - ' + getClassNameLocal(inscription.classeId) + ' (' + annee + ')';
+          inscriptionSelect.append(option);
+        });
+        updateEcheanceChoices(inscriptionSelect.value);
+        return;
+      }
+      const q = query.toLocaleLowerCase('fr');
+      const eleve = appState.eleves.find((e) => (e.matricule || '').toLocaleLowerCase('fr').includes(q));
+      inscriptionSelect.replaceChildren();
+      if (!eleve) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'Aucun élève trouvé';
+        inscriptionSelect.append(option);
+        updateEcheanceChoices('');
+        return;
+      }
+      const matched = appState.inscriptions.filter((i) => i.eleveId === eleve.id);
+      matched.forEach((inscription) => {
+        const annee = (appState.annees.find((a) => a.id === inscription.anneeId) || {}).annee || '—';
+        const option = document.createElement('option');
+        option.value = String(inscription.id);
+        option.textContent = eleve.prenom + ' ' + eleve.nom + ' - ' + getClassNameLocal(inscription.classeId) + ' (' + annee + ')';
+        inscriptionSelect.append(option);
+      });
+      if (!matched.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'Aucune inscription trouvée';
+        inscriptionSelect.append(option);
+      }
+      updateEcheanceChoices(matched.length ? String(matched[0].id) : '');
+    }
     function wireForms() {
       document.addEventListener('submit', (event) => {
         const form = event.target;
@@ -204,19 +252,42 @@
             classeId: Number(formData.get('classeId') || 0),
             actif: true
           };
-          const saved = form.dataset.editId
+          const isEdit = !!form.dataset.editId;
+          const saved = isEdit
             ? updateEleve(appState, Number(form.dataset.editId), payload)
             : createEleve(appState, payload);
           if (!saved) {
-            showToast('Vérifiez les informations obligatoires de l’élève');
+            showToast('Vérifiez les informations obligatoires de l'+'`u{2019}'+'élève');
             return;
           }
-          updateAndRender();
-          form.reset();
-          showToast(form.dataset.editId ? 'Fiche élève mise à jour' : 'Élève enregistré');
-          delete form.dataset.editId;
+          if (!isEdit) {
+            const tarifId = Number(form.querySelector('[data-auto-tarif]')?.value || 0);
+            const classeId = payload.classeId;
+            const anneeId = Number(appState.anneeActiveId || 0);
+            if (classeId && anneeId) {
+              const tarif = tarifId
+                ? appState.tarifs.find((t) => t.id === tarifId)
+                : appState.tarifs.find((t) => t.classeId === classeId && t.anneeId === anneeId);
+              if (tarif) {
+                const inscription = createInscription(appState, { eleveId: saved.id, anneeId, classeId });
+                if (inscription) generateEcheancesForInscription(appState, inscription.id, tarif);
+                updateAndRender();
+                form.reset();
+                showToast('Élève enregistré + inscription créée automatiquement');
+                delete form.dataset.editId;
+                return;
+              }
+            }
+            updateAndRender();
+            form.reset();
+            showToast('Élève enregistré '+'`u{2014}'+' ajoutez une inscription manuellement');
+          } else {
+            updateAndRender();
+            form.reset();
+            showToast('Fiche élève mise à jour');
+            delete form.dataset.editId;
+          }
         }
-    
         if (form.dataset.form === 'inscription') {
           event.preventDefault();
           const formData = new FormData(form);
@@ -300,6 +371,7 @@
       document.addEventListener('input', (event) => {
         if (event.target.matches('[data-student-search]')) applyStudentFilters();
         if (event.target.matches('[data-payment-search]')) applyPaymentFilters();
+        if (event.target.matches('[data-matricule-search]')) handleMatriculeSearch(event.target.value.trim());
       });
     
       document.addEventListener('change', (event) => {
@@ -420,6 +492,8 @@
               form.querySelector('[name="parent"]').value = item.parent || '';
               form.querySelector('[name="adresse"]').value = item.adresse || '';
               form.querySelector('[name="classeId"]').value = item.classeId || '';
+              const autoTarifSel = form.querySelector('[data-auto-tarif]');
+              if (autoTarifSel) autoTarifSel.value = '';
               form.dataset.editId = String(item.id);
               form.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
@@ -877,7 +951,7 @@
         <div class="panel section-form">
           <div class="panel-header"><h3>Nouvelle fiche élève</h3><span class="meta">Identité, contacts et responsable</span></div>
           <form class="form-grid" data-form="eleve">
-            <label>Matricule <input name="matricule" type="text" required /></label>
+            <label>Matricule <input name="matricule" type="text" placeholder="IBK-YYYY-NNNN (auto-généré si vide)" /></label>
             <label>Prénom <input name="prenom" type="text" required /></label>
             <label>Nom <input name="nom" type="text" required /></label>
             <label>Sexe
@@ -896,6 +970,12 @@
               </select>
             </label>
             <label>Adresse <input name="adresse" type="text" /></label>
+            <label>Tarif (inscription auto)
+              <select data-auto-tarif>
+                <option value="">— Sélectionner un tarif (optionnel) —</option>
+                ${state.tarifs.map((t) => `<option value="${t.id}">${escapeHtml(getClassName(state, t.classeId))} — ${formatMoney(t.montantAnnuel)} ${escapeHtml(state.config.devise)} (${escapeHtml(state.annees.find((a) => a.id === t.anneeId)?.annee || '—')})</option>`).join('')}
+              </select>
+            </label>
             <div class="form-actions span-two"><button type="submit" class="primary-btn">Enregistrer</button></div>
           </form>
         </div>
@@ -1055,6 +1135,9 @@
         <div class="panel section-form">
           <div class="panel-header"><h3>Enregistrer un paiement</h3><span class="meta">Paiements partiels autorisés, reçu disponible après validation</span></div>
           <form class="form-grid compact" data-form="paiement">
+            <label class="span-two">Rechercher par matricule
+              <input type="text" data-matricule-search placeholder="Ex: IBK-2025-0001" autocomplete="off" />
+            </label>
             <label>Inscription
               <select name="inscriptionId">
                 ${state.inscriptions.map((inscription) => `<option value="${inscription.id}">${getEleveName(state, inscription.eleveId)} - ${getClassName(state, inscription.classeId)} (${state.annees.find((annee) => annee.id === inscription.anneeId)?.annee || '—'})</option>`).join('')}
@@ -1096,16 +1179,17 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Élève</th><th>Classe / année</th><th>Montant</th><th>Mode</th><th>Référence</th><th>Caissier</th><th>Date</th><th>État</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Élève</th><th>Matricule</th><th>Classe / année</th><th>Montant</th><th>Mode</th><th>Référence</th><th>Caissier</th><th>Date</th><th>État</th><th>Actions</th></tr></thead>
               <tbody>
                 ${[...state.paiements].sort((a, b) => String(b.datePaiement).localeCompare(String(a.datePaiement))).map((paiement) => {
                   const inscription = state.inscriptions.find((i) => i.id === paiement.inscriptionId);
                   const eleve = inscription && state.eleves.find((item) => item.id === inscription.eleveId);
                   const studentName = eleve ? `${eleve.prenom} ${eleve.nom}` : '—';
-                  const searchable = [studentName, paiement.reference, paiement.mode, paiement.caissier].join(' ').toLowerCase();
+                  const searchable = [studentName, eleve?.matricule, paiement.reference, paiement.mode, paiement.caissier].join(' ').toLowerCase();
                   return `
                     <tr data-payment-row data-date="${paiement.datePaiement || ''}" data-status="${paiement.annule ? 'annule' : 'valide'}" data-search="${escapeHtml(searchable)}">
                       <td>${studentName}</td>
+                      <td>${escapeHtml(eleve?.matricule || '—')}</td>
                       <td>${inscription ? `${getClassName(state, inscription.classeId)} / ${state.annees.find((annee) => annee.id === inscription.anneeId)?.annee || '—'}` : '—'}</td>
                       <td>${formatMoney(paiement.montant)} ${state.config.devise}</td>
                       <td>${paiement.mode}</td>
@@ -1591,6 +1675,18 @@
   };
   factories['./modules/eleves.js'] = (require, exports) => {
     const { nextId } = require("./annees.js");
+    function generateMatricule(state) {
+      const year = new Date().getFullYear();
+      const prefix = `IBK-${year}-`;
+      const existing = state.eleves
+        .map((eleve) => eleve.matricule || '')
+        .filter((m) => m.startsWith(prefix))
+        .map((m) => parseInt(m.slice(prefix.length), 10))
+        .filter((n) => !isNaN(n));
+      const next = existing.length ? Math.max(...existing) + 1 : 1;
+      return `${prefix}${String(next).padStart(4, '0')}`;
+    }
+    
     function createEleve(state, payload = {}) {
       const nom = String(payload.nom || '').trim();
       const prenom = String(payload.prenom || '').trim();
@@ -1598,7 +1694,7 @@
     
       const item = {
         id: nextId(state.eleves),
-        matricule: payload.matricule || `IBK-${String(Date.now()).slice(-6)}`,
+        matricule: (payload.matricule && String(payload.matricule).trim()) ? String(payload.matricule).trim() : generateMatricule(state),
         nom,
         prenom,
         sexe: payload.sexe || 'M',
