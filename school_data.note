@@ -1,0 +1,27 @@
+{
+  "school": {
+    "name": "ECOLE IBK",
+    "sigle": "IBK",
+    "code": "IBK001",
+    "devise": "GNF",
+    "address": "Conakry, Guinée",
+    "phone": "+224 622 000 000"
+  },
+  "academicYear": "2025-2026",
+  "students": [],
+  "classes": [],
+  "teachers": [],
+  "subjects": [
+    { "id": 1, "name": "Français", "code": "FR" },
+    { "id": 2, "name": "Mathématiques", "code": "MAT" },
+    { "id": 3, "name": "Sciences", "code": "SCI" },
+    { "id": 4, "name": "Anglais", "code": "ANG" }
+  ],
+  "fees": [],
+  "payments": [],
+  "attendance": [],
+  "notes": []
+}
+
+
+

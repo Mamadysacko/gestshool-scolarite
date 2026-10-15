@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IBK - Gestion Scolaire</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div id="login-root" hidden></div>
+    <div class="app-shell" id="app-shell" hidden>
+      <button class="menu-toggle" id="menuToggle" type="button" aria-label="Ouvrir le menu" aria-expanded="false">☰</button>
+      <div class="sidebar-scrim" id="sidebarScrim"></div>
+      <aside class="sidebar" id="sidebar">
+        <div class="brand-block">
+          <div class="brand-badge">IBK</div>
+          <div>
+            <p class="brand-title">Gestion Scolaire</p>
+            <span class="brand-subtitle">Comptabilité &amp; scolarité</span>
+          </div>
+        </div>
+
+        <nav class="main-nav" aria-label="Menu principal">
+          <button class="nav-btn active" data-group="accueil">Tableau de bord</button>
+          <button class="nav-btn" data-group="eleves">Élèves</button>
+          <button class="nav-btn" data-group="scolarite">Scolarité</button>
+          <button class="nav-btn" data-group="paiements">Paiements</button>
+          <button class="nav-btn" data-group="depenses">Dépenses</button>
+          <button class="nav-btn" data-group="rapports">Rapports</button>
+          <button class="nav-btn" data-group="administration">Administration</button>
+        </nav>
+
+        <div class="sidebar-actions">
+          <span id="roleLabel" class="role-label"></span>
+          <button id="exportDataBtn" class="secondary-btn">Exporter JSON</button>
+          <label class="file-import" id="importLabel">
+            <input type="file" id="importDataInput" accept=".note,.json,.txt" />
+            Importer JSON
+          </label>
+          <button id="logoutBtn" class="secondary-btn">Se déconnecter</button>
+        </div>
+      </aside>
+
+      <main class="main-panel">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">École IBK</p>
+            <h1 id="pageTitle">Tableau de bord</h1>
+          </div>
+          <button class="help-btn" id="helpBtn" type="button" title="Aide sur cette page" aria-label="Aide sur cette page">?</button>
+          <div class="top-actions">
+            <button class="primary-btn" data-open="new-eleve">+ Nouvel élève</button>
+            <button class="primary-btn ghost" data-open="new-inscription">+ Nouvelle inscription</button>
+          </div>
+        </header>
+        <nav class="subtabs" id="subtabs" role="tablist" aria-label="Sous-onglets" hidden></nav>
+
+        <section id="dashboard" class="content-section active"></section>
+        <section id="analyse" class="content-section hidden"></section>
+        <section id="annees" class="content-section hidden"></section>
+        <section id="classes" class="content-section hidden"></section>
+        <section id="eleves" class="content-section hidden"></section>
+        <section id="inscriptions" class="content-section hidden"></section>
+        <section id="tarifs" class="content-section hidden"></section>
+        <section id="paiements" class="content-section hidden"></section>
+        <section id="dettes" class="content-section hidden"></section>
+        <section id="depenses" class="content-section hidden"></section>
+        <section id="rapports" class="content-section hidden"></section>
+        <section id="config" class="content-section hidden"></section>
+        <section id="aide" class="content-section hidden"></section>
+      </main>
+    </div>
+
+    <section id="print-root" aria-hidden="true"></section>
+    <div id="modal-root"></div>
+    <div id="toast" class="toast hidden"></div>
+
+    <script defer src="./offline-app.js"></script>
+  </body>
+</html>

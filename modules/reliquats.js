@@ -1,0 +1,81 @@
+import { nextId } from './annees.js';
+import { logOperation } from './audit.js';
+import { echeancierSituation } from './allocation.js';
+import { todayISO } from './utils.js';
+
+// Reliquats (dettes des années précédentes).
+// La dette reste portée par l'inscription d'origine (ses échéances impayées) : c'est l'unique source de vérité,
+// ce qui empêche de compter la même somme due deux fois (ancienne année + nouvelle année).
+// Le registre `state.reliquats` trace le report : montant reporté, date, année de report ; les règlements sont
+// des paiements ordinaires sur l'inscription d'origine, marqués `reliquatId` et encaissés sur l'année de report.
+
+function annee(state, id) { return state.annees.find((a) => a.id === id) || null; }
+
+// Ordre chronologique des années : date de rentrée, sinon libellé (« 2025-2026 » < « 2026-2027 »)
+function anneeKey(state, id) {
+  const a = annee(state, id);
+  return a ? `${a.dateDebut || ''}|${a.annee}` : '';
+}
+
+export function estAnterieure(state, anneeA, anneeB) {
+  return anneeKey(state, anneeA) < anneeKey(state, anneeB);
+}
+
+export function reliquatOf(state, inscriptionId) {
+  return (state.reliquats || []).find((r) => r.inscriptionId === Number(inscriptionId)) || null;
+}
+
+// Report automatique et idempotent des soldes impayés : une inscription est reportée dès que l'élève est inscrit
+// dans une année postérieure, ou que son année est clôturée. Un même solde n'est jamais reporté deux fois.
+export function reporterReliquats(state) {
+  if (!Array.isArray(state.reliquats)) state.reliquats = [];
+  const created = [];
+  state.inscriptions.forEach((inscription) => {
+    const later = state.inscriptions
+      .filter((j) => j.eleveId === inscription.eleveId && estAnterieure(state, inscription.anneeId, j.anneeId))
+      .sort((x, y) => anneeKey(state, x.anneeId).localeCompare(anneeKey(state, y.anneeId)))[0];
+    const existing = reliquatOf(state, inscription.id);
+    if (existing) {
+      if (!existing.anneeReportId && later) existing.anneeReportId = later.anneeId;
+      return;
+    }
+    const closed = annee(state, inscription.anneeId)?.statut === 'cloturee';
+    if (!later && !closed) return;
+    const reste = echeancierSituation(inscription).reste;
+    if (reste <= 0) return;
+    const record = {
+      id: nextId(state.reliquats), eleveId: inscription.eleveId, inscriptionId: inscription.id, anneeOrigineId: inscription.anneeId,
+      anneeReportId: later?.anneeId || null, montantReporte: reste, dateReport: todayISO(), creeLe: Date.now()
+    };
+    state.reliquats.push(record);
+    created.push(record);
+    const eleve = state.eleves.find((e) => e.id === inscription.eleveId);
+    logOperation(state, 'reliquat', `Solde impayé ${annee(state, inscription.anneeId)?.annee || ''} de ${eleve ? `${eleve.prenom} ${eleve.nom}` : 'l’élève'} reporté${later ? ` sur ${annee(state, later.anneeId)?.annee}` : ' (année clôturée)'}`, reste);
+  });
+  return created;
+}
+
+// Montant reporté, remboursé (règlements validés) et reste dû calculé sur l'inscription d'origine
+export function situationReliquat(state, record) {
+  const inscription = state.inscriptions.find((i) => i.id === record.inscriptionId);
+  const reste = inscription ? echeancierSituation(inscription).reste : 0;
+  const reglements = state.paiements.filter((p) => !p.annule && p.reliquatId === record.id).sort((a, b) => a.id - b.id);
+  const rembourse = reglements.reduce((s, p) => s + Number(p.montant || 0), 0);
+  return { ...record, inscription, reste, rembourse, reglements, statut: reste <= 0 ? 'solde' : rembourse > 0 ? 'partiel' : 'du' };
+}
+
+export const STATUT_RELIQUAT = { du: 'Dû', partiel: 'Partiellement remboursé', solde: 'Soldé' };
+
+export function reliquatsEleve(state, eleveId) {
+  return (state.reliquats || []).filter((r) => r.eleveId === Number(eleveId)).map((r) => situationReliquat(state, r));
+}
+
+// Dette antérieure encore due par un élève (hors inscription donnée)
+export function detteRestante(state, eleveId, saufInscriptionId = 0) {
+  return reliquatsEleve(state, eleveId).filter((r) => r.inscriptionId !== saufInscriptionId).reduce((s, r) => s + r.reste, 0);
+}
+
+// Année sur laquelle un règlement de dette est encaissé (trésorerie) : celle du report, sinon l'année active
+export function anneeEncaissement(state, record) {
+  return record.anneeReportId || state.anneeActiveId || record.anneeOrigineId;
+}

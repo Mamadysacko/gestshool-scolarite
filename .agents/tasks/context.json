@@ -1,0 +1,25 @@
+{
+  "project_type": "Application web offline 100% vanilla JS ES modules, sans bundler NPM ni framework",
+  "language": "JavaScript (ES modules), HTML, CSS",
+  "build_system": "build-offline.js (script Node.js CJS) — lit app.js et tous les modules, génère offline-app.js via bundle maison. CRITICAL: index.html charge UNIQUEMENT offline-app.js (pas app.js directement). Toute modification de source doit être suivie de 'node build-offline.js'.",
+  "test_framework": "Aucun test automatisé — vérification manuelle dans le navigateur (ouvrir index.html) + vérification console JS sans erreur",
+  "build_command": "node build-offline.js",
+  "test_command": "Ouvrir index.html dans le navigateur, vérifier console JS (F12) sans erreurs",
+  "verification_instructions": "1. Exécuter 'node build-offline.js' depuis 'c:\\Users\\hp\\OneDrive\\Bureau\\scolarite ibk' — doit terminer sans erreur et afficher 'Application autonome créée : offline-app.js'. 2. Ouvrir index.html dans le navigateur. 3. Vérifier console F12 — aucune erreur. 4. Tester manuellement les fonctionnalités modifiées.",
+  "snapshot_or_generated_files": "offline-app.js — généré par 'node build-offline.js' à partir de app.js + ui.js + storage.js + modules/*.js. Ce fichier DOIT être regénéré après chaque modification des sources.",
+  "environment_constraints": "Windows PowerShell. Node.js disponible. Pas de npm install nécessaire. build-offline.js est un script CJS (require/fs) pas un module ES. Ouvrir index.html directement dans le navigateur (file://) ou via serveur local.",
+  "contribution_requirements": "Ne pas créer de nouveaux fichiers (modifier uniquement les existants). Conserver tous les exports/imports existants. Ne PAS casser la structure DEFAULT_STATE dans storage.js. Graphiques en CSS/HTML pur uniquement (pas de Chart.js). Les imports dans les fichiers source doivent rester sur une seule ligne format 'import { ... } from ...' pour que build-offline.js les détecte correctement.",
+  "key_patterns": "- renderXxx(state) dans ui.js écrit innerHTML de la section DOM correspondante. - Handlers d'événements centralisés dans app.js (wireForms, bindMenu). - Modules dans modules/*.js exportent des fonctions pures qui mutent state. - updateAndRender() = saveState + renderAll(). - showToast() affiche une notification temporaire. - openPrintWindow(title, content) = window.print() sur #print-root. - downloadCsv(filename, rows) génère un CSV. - escapeHtml() pour toute valeur HTML. - formatMoney() pour les montants. - getClassName(state, id) et getEleveName(state, id) dans ui.js. - nextId(items) dans modules/annees.js. - data-action='xxx:yyy:id' pattern pour les boutons d'action. - dashboardFilters = {yearId, classId, category} dans app.js — filtres dashboard.",
+  "relevant_files": [
+    "style.css — à réécrire entièrement (palette orange/blanc/violet)",
+    "ui.js — renderDashboard, renderEleves, renderPaiements, renderRapports, printPaymentReceipt à modifier; ajouter printPeriodReport, exportPeriodReportCsv",
+    "app.js — handler form 'eleve' (inscription auto), handler click (nouveaux boutons rapport période), handler input matricule, dashboardFilters (ajouter period), handleMatriculeSearch",
+    "modules/eleves.js — generateMatricule() locale, modifier createEleve pour matricule auto",
+    "modules/inscriptions.js — à étudier pour comprendre createInscription + generateEcheancesForInscription",
+    "modules/paiements.js — à étudier pour comprendre la structure écheance/paiement",
+    "storage.js — à NE PAS modifier (structure DEFAULT_STATE intouchable)",
+    "build-offline.js — à NE PAS modifier (le regénérer juste avec node)",
+    "index.html — à NE PAS modifier"
+  ],
+  "directory_structure": "c:\\Users\\hp\\OneDrive\\Bureau\\scolarite ibk\\ — racine du projet. modules/ — 5 modules métier (annees.js, classes.js, eleves.js, inscriptions.js, paiements.js, tarifs.js). .agents/tasks/ — artefacts de planification (ne jamais committer). offline-app.js — bundle généré, chargé par index.html."
+}

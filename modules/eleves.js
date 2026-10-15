@@ -39,18 +39,18 @@ export function createEleve(state, payload = {}) {
 export function updateEleve(state, id, payload = {}) {
   const item = state.eleves.find((eleve) => eleve.id === Number(id));
   if (!item) return null;
+  const nom = String(payload.nom ?? item.nom).trim();
+  const prenom = String(payload.prenom ?? item.prenom).trim();
+  const matricule = String(payload.matricule || item.matricule).trim();
+  if (!nom || !prenom) return null;
+  if (state.eleves.some((e) => e.id !== item.id && e.matricule === matricule)) return null;
+  const pick = (key) => (payload[key] !== undefined ? payload[key] : item[key]);
 
   Object.assign(item, {
-    matricule: payload.matricule || item.matricule,
-    nom: payload.nom || item.nom,
-    prenom: payload.prenom || item.prenom,
-    sexe: payload.sexe || item.sexe,
-    dateNaissance: payload.dateNaissance || item.dateNaissance,
-    telephone: payload.telephone || item.telephone,
-    email: payload.email || item.email,
-    parent: payload.parent || item.parent,
-    adresse: payload.adresse || item.adresse,
-    classeId: Number(payload.classeId || item.classeId),
+    matricule, nom, prenom,
+    sexe: pick('sexe'), dateNaissance: pick('dateNaissance'), telephone: pick('telephone'), email: pick('email'),
+    parent: pick('parent'), adresse: pick('adresse'),
+    classeId: payload.classeId !== undefined ? Number(payload.classeId || 0) : item.classeId,
     actif: payload.actif !== undefined ? payload.actif : item.actif
   });
 
@@ -64,10 +64,13 @@ export function toggleEleveState(state, id) {
   return item;
 }
 
+// Refus si un paiement existe pour l'élève : l'historique comptable est conservé.
 export function deleteEleve(state, id) {
   const targetId = Number(id);
   const index = state.eleves.findIndex((item) => item.id === targetId);
   if (index === -1) return false;
+  const inscriptionIds = state.inscriptions.filter((i) => i.eleveId === targetId).map((i) => i.id);
+  if (state.paiements.some((p) => inscriptionIds.includes(p.inscriptionId))) return false;
 
   state.eleves.splice(index, 1);
   state.inscriptions = state.inscriptions.filter((inscription) => inscription.eleveId !== targetId);
