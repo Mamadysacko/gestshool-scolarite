@@ -38,6 +38,11 @@ export function depensesFiltrees(state, { yearId = 0, from = '', to = '', catego
   });
 }
 
+// Autres entrées de caisse (ex. remboursement d'avance sur salaire en espèces)
+export function entreesFiltrees(state, { yearId = 0, from = '', to = '' } = {}) {
+  return (state.entreesCaisse || []).filter((e) => (!yearId || e.anneeId === yearId) && inRange(e.date, from, to));
+}
+
 export const somme = (list, key) => list.reduce((s, item) => s + num(item[key]), 0);
 
 export function soldeOuvertureBase(state, yearId = 0) {
@@ -51,9 +56,10 @@ export function situationCaisse(state, { yearId = 0, from = '', to = '' } = {}) 
     const before = new Date(`${from}T00:00:00`);
     before.setDate(before.getDate() - 1);
     const veille = `${before.getFullYear()}-${String(before.getMonth() + 1).padStart(2, '0')}-${String(before.getDate()).padStart(2, '0')}`;
-    ouverture += somme(recettesFiltrees(state, { yearId, to: veille }), 'montant') - somme(depensesFiltrees(state, { yearId, to: veille }), 'montant');
+    ouverture += somme(recettesFiltrees(state, { yearId, to: veille }), 'montant') + somme(entreesFiltrees(state, { yearId, to: veille }), 'montant') - somme(depensesFiltrees(state, { yearId, to: veille }), 'montant');
   }
   const recettes = somme(recettesFiltrees(state, { yearId, from, to }), 'montant');
   const depenses = somme(depensesFiltrees(state, { yearId, from, to }), 'montant');
-  return { ouverture, recettes, depenses, solde: ouverture + recettes - depenses };
+  const autres = somme(entreesFiltrees(state, { yearId, from, to }), 'montant');
+  return { ouverture, recettes, autres, depenses, solde: ouverture + recettes + autres - depenses };
 }

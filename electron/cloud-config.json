@@ -1,0 +1,8 @@
+{
+  "produit": "gestscolarite",
+  "url_fonctions": "https://europe-west1-gestion-school-58746.cloudfunctions.net",
+  "url_mises_a_jour": "https://gestion-school-58746.web.app/mises-a-jour/gestscolarite",
+  "cle_publique": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEASYZgcnC4aXYMoLww9Y6FFlKVGjkGgTCX5DpOZpzBBDs=\n-----END PUBLIC KEY-----\n\n",
+  "intervalle_minutes": 15,
+  "exiger_activation": false
+}

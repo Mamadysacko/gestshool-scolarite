@@ -2,16 +2,20 @@ import { escapeHtml, formatMoney, formatDateFr, todayISO } from './utils.js';
 import { previewPaiement, STATUT_GLOBAL_LABELS } from './allocation.js';
 import { echeancierHtml, allocationTableHtml, progressBar } from './echeancier-view.js';
 import { cashierName } from './paiements.js';
-import { MODALITES, tarifFor, modalitesDisponibles, hasValidPayments, modaliteActuelle, planPourModalite, totalTranches, totalMensuel } from './modalites.js';
+import { MODALITES, tarifFor, modalitesDisponibles, hasValidPayments, modaliteActuelle, planPourModalite, totalTranches, texteMensuel } from './modalites.js';
 import { studentOf } from './finance.js';
 import { reliquatsEleve, reliquatOf, situationReliquat, anneeEncaissement } from './reliquats.js';
+import { comptesActifs, compteParDefaut } from './comptes.js';
+import { attentesOuvertes, MODES_ATTENTE } from './attente.js';
+import { reductionLabel } from './reductions.js';
+import { can } from './auth.js';
 
 // Formulaire de paiement : recherche dynamique de l'élève (nom ou matricule) → fiche et échéancier remplis
 // automatiquement → montant → aperçu immédiat de l'imputation et du solde.
 const selection = { inscriptionId: 0, modalite: '', reliquatId: 0 };
 const yearName = (state, id) => state.annees.find((a) => a.id === id)?.annee || '—';
 const root = { state: null, form: null };
-const MODES = { espece: 'Espèces', virement: 'Virement', cheque: 'Chèque', mobile_money: 'Mobile Money', carte: 'Carte' };
+const MODES = { espece: 'Espèces', virement: 'Virement bancaire', cheque: 'Chèque', mobile_money: 'Mobile Money', carte: 'Carte bancaire' };
 
 const label = (state, inscription) => {
   const s = studentOf(state, inscription);
@@ -67,7 +71,7 @@ function modaliteHtml(state, inscription, plan) {
   const dispo = tarif ? modalitesDisponibles(tarif) : { tranches: actuelle === 'tranches', mensuel: actuelle === 'mensuel' };
   const details = {
     tranches: tarif ? `${(tarif.tranches || []).length} tranches · ${formatMoney(totalTranches(tarif))} ${devise}` : '',
-    mensuel: tarif && Number(tarif.montantMensuel) > 0 ? `${tarif.nbMois} × ${formatMoney(tarif.montantMensuel)} = ${formatMoney(totalMensuel(tarif))} ${devise}` : 'Montant mensuel non défini dans le tarif'
+    mensuel: tarif && Number(tarif.montantMensuel) > 0 ? `${texteMensuel(state, tarif, formatMoney)} ${devise}` : 'Montant mensuel non défini dans le tarif'
   };
   const option = (key) => `<label class="modalite-option ${selection.modalite === key ? 'selected' : ''} ${dispo[key] ? '' : 'disabled'}">
       <input type="radio" name="modalite" value="${key}" data-pay="modalite" ${selection.modalite === key ? 'checked' : ''} ${dispo[key] ? '' : 'disabled'} required />
@@ -103,6 +107,39 @@ function dettesHtml(state, inscription) {
     <ul>${dettes.map((r) => `<li>Année ${escapeHtml(yearName(state, r.anneeOrigineId))} : reste ${formatMoney(r.reste)} ${devise} <button type="button" class="secondary-btn small-btn" data-pay-dette="${r.id}">Régler cette dette</button></li>`).join('')}</ul></div>`;
 }
 
+// Réduction (remise, bourse, exonération) accordée à l'élève, et accès direct pour en accorder une
+function reductionHtml(state, inscription) {
+  if (selection.reliquatId) return '';
+  const devise = escapeHtml(state.config.devise || '');
+  const remise = (inscription.echeances || []).reduce((s, e) => s + Number(e.remise || 0), 0);
+  if (inscription.reduction) {
+    return `<p class="reduction-note">🎓 ${escapeHtml(reductionLabel(inscription.reduction))} — ${formatMoney(remise)} ${devise} déduits (${escapeHtml(inscription.reduction.motif)})
+      ${can('write') ? `<button type="button" class="link-btn" data-action="inscription:reduction:${inscription.id}">Modifier</button>` : ''}</p>`;
+  }
+  return can('write') ? `<p class="meta"><button type="button" class="link-btn" data-action="inscription:reduction:${inscription.id}">Accorder une remise, une bourse ou une exonération</button></p>` : '';
+}
+
+// Chèques / virements de l'élève en attente de confirmation : non comptés dans le solde affiché
+function attentesHtml(state, inscription) {
+  const list = attentesOuvertes(state, inscription.id);
+  if (!list.length) return '';
+  const devise = escapeHtml(state.config.devise || '');
+  return `<div class="form-warning">⏳ ${list.length} règlement(s) en attente de confirmation : ${list.map((a) => `${escapeHtml(a.numero)} — ${escapeHtml(MODES[a.mode] || a.mode)} ${escapeHtml(a.reference)} : <b>${formatMoney(a.montant)} ${devise}</b>`).join(' ; ')}.
+    Ils ne sont pas encore déduits du solde ci-dessous.</div>`;
+}
+
+// Moyen de paiement choisi : compte proposé en conséquence ; l'option « en attente » n'existe pas pour les espèces
+function syncMode(state, form) {
+  const mode = form.querySelector('[name="mode"]')?.value || 'espece';
+  const compte = form.querySelector('[name="compteId"]');
+  if (compte && !compte.dataset.touched) compte.value = String(compteParDefaut(state, mode)?.id || compte.value);
+  const attente = form.querySelector('[data-pay-attente]');
+  if (attente) {
+    attente.hidden = !MODES_ATTENTE.includes(mode);
+    if (attente.hidden) attente.querySelector('input').checked = false;
+  }
+}
+
 function currentInscription(root) {
   return root.state.inscriptions.find((i) => i.id === selection.inscriptionId) || null;
 }
@@ -135,6 +172,8 @@ function renderStudent(root) {
         <div><span class="eyebrow">Année scolaire</span><strong>${escapeHtml(annee?.annee || '—')}</strong></div>
       </div>
       ${dettesHtml(state, inscription)}
+      ${reductionHtml(state, inscription)}
+      ${attentesHtml(state, inscription)}
       ${selection.reliquatId ? '' : modaliteHtml(state, inscription, plan)}
       ${plan && !plan.ok && !plan.pending ? `<p class="form-error">${escapeHtml(plan.message)}</p>` : ''}
       ${schedule.echeances.length ? `<div class="schedule-title"><b>${selection.reliquatId ? `Échéancier ${escapeHtml(yearName(state, inscription.anneeId))} (dette)` : plan?.ok ? `Échéancier — ${escapeHtml(MODALITES[selection.modalite])}` : 'Échéancier actuel (provisoire, modalité à choisir)'}</b>
@@ -181,7 +220,7 @@ export function paymentFormHtml(state) {
       <select data-pay="year" name="anneeId">${state.annees.map((a) => `<option value="${a.id}" ${a.id === state.anneeActiveId ? 'selected' : ''}>${escapeHtml(a.annee)}</option>`).join('')}</select>
     </label>
     <label class="span-two search-field">Élève — nom ou matricule
-      <input type="search" data-pay="student" placeholder="Ex : IBK-2026-0001 ou Aminata" role="combobox" aria-autocomplete="list" />
+      <input type="search" data-pay="student" placeholder="Nom, prénom ou matricule" role="combobox" aria-autocomplete="list" />
       <ul class="search-results" data-pay-results hidden></ul>
     </label>
     <div class="span-all" data-pay-card></div>
@@ -189,15 +228,20 @@ export function paymentFormHtml(state) {
       <span class="input-row"><input name="montant" data-pay="montant" type="number" min="1" step="1" required /><button type="button" class="secondary-btn small-btn" data-pay-solder>Solder tout</button></span>
     </label>
     <label>Moyen de paiement
-      <select name="mode">${Object.entries(MODES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
+      <select name="mode" data-pay="mode">${Object.entries(MODES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
+    </label>
+    <label>Compte / caisse destinataire
+      <select name="compteId" data-pay="compte">${comptesActifs(state).map((c) => `<option value="${c.id}" ${c.id === compteParDefaut(state, 'espece')?.id ? 'selected' : ''}>${escapeHtml(c.libelle)}</option>`).join('')}</select>
     </label>
     <label>Date du paiement <input name="datePaiement" type="date" value="${todayISO()}" max="${todayISO()}" required /></label>
     <label>Référence (chèque, transaction…) <input name="reference" type="text" /></label>
     <label>Payeur (si différent de l’élève) <input name="payeur" type="text" /></label>
     <label>Description / motif <input name="motifPaiement" type="text" placeholder="Frais de scolarité" /></label>
+    <label>Observation (facultatif) <input name="observation" type="text" maxlength="200" /></label>
+    <label class="check-row span-two" data-pay-attente hidden><input type="checkbox" name="enAttente" /> En attente de confirmation (chèque non encore crédité, virement annoncé) : exclu des totaux jusqu’à sa confirmation</label>
     <p class="meta span-all">Caissier : <b>${escapeHtml(cashierName(state))}</b> — enregistré automatiquement sur le reçu et dans l’historique.</p>
     <div class="span-all" data-pay-preview></div>
-    <label class="check-row"><input type="checkbox" name="imprimer" checked /> Imprimer le reçu après l’enregistrement</label>
+    <p class="meta span-all">Après l’enregistrement, le reçu s’affiche automatiquement : imprimer, télécharger en PDF ou fermer.</p>
     <div class="form-actions span-all"><button type="submit" class="primary-btn" data-pay-submit disabled>Enregistrer le paiement</button></div>
   </form>`;
 }
@@ -225,6 +269,8 @@ export function selectStudentForPayment(state, inscriptionId) {
   const form = document.querySelector('form[data-form="paiement"]');
   const inscription = state.inscriptions.find((i) => i.id === Number(inscriptionId));
   if (!form || !inscription) return false;
+  const volet = form.closest('details.form-pli');
+  if (volet) volet.open = true; // formulaire replié derrière son bouton : ouvert pour l'élève choisi
   root.state = state;
   root.form = form;
   form.querySelector('[data-pay="year"]').value = String(inscription.anneeId);
@@ -246,6 +292,8 @@ export function bindPaymentForm(state) {
     root.state = state;
     root.form = t.closest('form');
     if (t.matches('[data-pay="montant"]')) { renderPreview(root); return; }
+    if (t.matches('[data-pay="mode"]')) { syncMode(state, root.form); return; }
+    if (t.matches('[data-pay="compte"]')) { t.dataset.touched = '1'; return; }
     if (t.matches('[data-pay="modalite"]')) { selection.modalite = t.value; renderStudent(root); return; }
     if (t.matches('[data-pay="student"]')) {
       // Toute frappe annule la sélection précédente et relance la recherche

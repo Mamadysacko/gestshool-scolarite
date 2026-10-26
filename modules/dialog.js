@@ -3,6 +3,9 @@ import { escapeHtml } from './utils.js';
 function fieldHtml(field, index) {
   const name = field.name || (index === 0 ? 'v' : `f${index}`);
   const value = field.value !== undefined ? ` value="${escapeHtml(field.value)}"` : '';
+  if (Array.isArray(field.options)) {
+    return `<label class="dialog-field">${escapeHtml(field.label)}<select name="${escapeHtml(name)}">${field.options.map(([v, l]) => `<option value="${escapeHtml(v)}" ${String(v) === String(field.value ?? '') ? 'selected' : ''}>${escapeHtml(l)}</option>`).join('')}</select></label>`;
+  }
   if (field.type === 'checkbox') {
     return `<label class="dialog-check"><input name="${escapeHtml(name)}" type="checkbox" ${field.checked ? 'checked' : ''} /> ${escapeHtml(field.label)}</label>`;
   }

@@ -25,32 +25,39 @@ export function reliquatOf(state, inscriptionId) {
   return (state.reliquats || []).find((r) => r.inscriptionId === Number(inscriptionId)) || null;
 }
 
-// Report automatique et idempotent des soldes impayés : une inscription est reportée dès que l'élève est inscrit
-// dans une année postérieure, ou que son année est clôturée. Un même solde n'est jamais reporté deux fois.
-export function reporterReliquats(state) {
+// Report EXPLICITE des soldes impayés : rien n'est reporté automatiquement. L'établissement choisit, dans la page
+// « Dettes antérieures », les soldes d'années antérieures à reprendre sur une année donnée. Chaque report garde
+// son origine (année, classe), le montant initial, ce qui avait déjà été réglé et le solde reporté ; un même solde
+// n'est jamais reporté deux fois.
+export function soldesReportables(state, cibleId) {
+  return state.inscriptions.filter((i) => estAnterieure(state, i.anneeId, Number(cibleId)) && !reliquatOf(state, i.id)).map((inscription) => {
+    const sit = echeancierSituation(inscription);
+    const eleve = state.eleves.find((e) => e.id === inscription.eleveId);
+    const inscritCible = state.inscriptions.some((j) => j.eleveId === inscription.eleveId && j.anneeId === Number(cibleId));
+    return { inscription, eleve, total: sit.total, paye: sit.paye, reste: sit.reste, inscritCible };
+  }).filter((x) => x.reste > 0).sort((x, y) => anneeKey(state, x.inscription.anneeId).localeCompare(anneeKey(state, y.inscription.anneeId)) || String(x.eleve?.nom).localeCompare(String(y.eleve?.nom), 'fr'));
+}
+
+export function reporterSoldes(state, cibleId, inscriptionIds = []) {
   if (!Array.isArray(state.reliquats)) state.reliquats = [];
+  const cible = annee(state, Number(cibleId));
+  if (!cible) throw new Error('Année de report introuvable.');
   const created = [];
-  state.inscriptions.forEach((inscription) => {
-    const later = state.inscriptions
-      .filter((j) => j.eleveId === inscription.eleveId && estAnterieure(state, inscription.anneeId, j.anneeId))
-      .sort((x, y) => anneeKey(state, x.anneeId).localeCompare(anneeKey(state, y.anneeId)))[0];
-    const existing = reliquatOf(state, inscription.id);
-    if (existing) {
-      if (!existing.anneeReportId && later) existing.anneeReportId = later.anneeId;
-      return;
-    }
-    const closed = annee(state, inscription.anneeId)?.statut === 'cloturee';
-    if (!later && !closed) return;
-    const reste = echeancierSituation(inscription).reste;
-    if (reste <= 0) return;
+  inscriptionIds.map(Number).forEach((id) => {
+    const inscription = state.inscriptions.find((i) => i.id === id);
+    if (!inscription) throw new Error('Inscription introuvable.');
+    if (!estAnterieure(state, inscription.anneeId, cible.id)) throw new Error('Seul le solde d’une année antérieure peut être reporté.');
+    if (reliquatOf(state, id)) return; // déjà reporté : jamais deux fois
+    const sit = echeancierSituation(inscription);
+    if (sit.reste <= 0) return;
     const record = {
-      id: nextId(state.reliquats), eleveId: inscription.eleveId, inscriptionId: inscription.id, anneeOrigineId: inscription.anneeId,
-      anneeReportId: later?.anneeId || null, montantReporte: reste, dateReport: todayISO(), creeLe: Date.now()
+      id: nextId(state.reliquats), eleveId: inscription.eleveId, inscriptionId: inscription.id, anneeOrigineId: inscription.anneeId, classeOrigineId: inscription.classeId,
+      anneeReportId: cible.id, montantInitial: sit.total, regleAvantReport: sit.paye, montantReporte: sit.reste, dateReport: todayISO(), creeLe: Date.now()
     };
     state.reliquats.push(record);
     created.push(record);
     const eleve = state.eleves.find((e) => e.id === inscription.eleveId);
-    logOperation(state, 'reliquat', `Solde impayé ${annee(state, inscription.anneeId)?.annee || ''} de ${eleve ? `${eleve.prenom} ${eleve.nom}` : 'l’élève'} reporté${later ? ` sur ${annee(state, later.anneeId)?.annee}` : ' (année clôturée)'}`, reste);
+    logOperation(state, 'reliquat', `Solde impayé ${annee(state, inscription.anneeId)?.annee || ''} de ${eleve ? `${eleve.prenom} ${eleve.nom}` : 'l’élève'} reporté sur ${cible.annee}`, sit.reste);
   });
   return created;
 }

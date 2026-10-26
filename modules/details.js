@@ -1,8 +1,12 @@
 import { escapeHtml, formatMoney, formatDateFr } from './utils.js';
 import { inscriptionSituation, STATUT_LABELS, studentOf, yearLabel, classOf, labelEcheance, scopeInscriptions } from './finance.js';
-import { buildReceiptData, receiptHtml, RECEIPT_CSS } from './recus.js';
+import { buildReceiptData, receiptHtml, RECEIPT_CSS, printReceipt, receiptFileName } from './recus.js';
+import { showDocumentPreview } from './doc-preview.js';
+import { expenseReceiptHtml, printExpenseReceipt, EXPENSE_RECEIPT_CSS } from './depenses-view.js';
+import { bulletinHtml, BULLETIN_CSS, printBulletins } from './bulletin-paie.js';
 import { ensureReceiptNumber } from './paiements.js';
 import { paymentAllocations, allocationLabel } from './allocation.js';
+import { texteMensuel } from './modalites.js';
 
 function modal(title, subtitle, body) {
   const root = document.getElementById('modal-root');
@@ -39,7 +43,7 @@ function showTarif(state, id) {
   const nb = state.inscriptions.filter((i) => i.classeId === t.classeId && i.anneeId === t.anneeId).length;
   return modal(`Frais — ${classOf(state, t.classeId)?.nom || '—'}`, `${yearLabel(state, t.anneeId)} · ${nb} élève(s) concerné(s)`, `
     <div class="profile-section"><div class="profile-metric"><span>Montant annuel</span><strong>${money(state, t.montantAnnuel)}</strong></div>
-    <p class="meta">${Number(t.montantMensuel) > 0 ? `Paiement mensuel : ${t.nbMois} × ${money(state, t.montantMensuel)} = ${money(state, t.montantMensuel * t.nbMois)}${t.moisDebut ? `, 1ère mensualité le ${escapeHtml(formatDateFr(t.moisDebut))}` : ''}.` : 'Paiement mensuel non proposé pour cette classe.'}</p>
+    <p class="meta">${Number(t.montantMensuel) > 0 ? `Paiement mensuel : ${escapeHtml(texteMensuel(state, t, formatMoney))} ${escapeHtml(state.config.devise)}${t.moisDebut ? `, 1ère mensualité le ${escapeHtml(formatDateFr(t.moisDebut))}` : ''}.` : 'Paiement mensuel non proposé pour cette classe.'}</p>
     <h3>Tranches</h3>${table(['Tranche', 'Montant', 'Date d’échéance'], (t.tranches || []).map((tr) => `<tr><td>${escapeHtml(tr.libelle)}</td><td>${money(state, tr.montant)}</td><td>${escapeHtml(formatDateFr(tr.dateLimite))}</td></tr>`), 'Aucune tranche.')}</div>`);
 }
 
@@ -77,16 +81,38 @@ function showPaiement(state, id) {
     </dl>${p.annule ? '' : `<div class="form-actions"><button class="primary-btn small-btn" data-action="paiement:receipt:${p.id}">Voir le reçu</button></div>`}</div>`);
 }
 
-// Aperçu du reçu à l'écran : même rendu que l'impression (un exemplaire), avec bouton d'impression
-export function showReceiptPreview(state, id) {
+// Aperçus de documents (reçu de scolarité, reçu de dépense, bulletin de paie) : affichés automatiquement après
+// une opération réussie ou à la demande, avec Imprimer, Télécharger en PDF et Fermer.
+// `duplicata` : consultation ou réimpression ultérieure d'un reçu (jamais de nouveau paiement)
+export function showReceiptPreview(state, id, { duplicata = false } = {}) {
   const payment = state.paiements.find((p) => p.id === Number(id));
   if (!payment || payment.annule) return false;
   ensureReceiptNumber(state, payment);
-  const { data, html } = receiptHtml(state, payment, 1);
-  return modal(`Reçu ${data.numero}`, `${data.eleve} · ${formatMoney(data.montant)} ${state.config.devise}`, `
-    <style>${RECEIPT_CSS} .receipt-preview .rc-sheet { height: auto; } .receipt-preview .rc-copy { border: 1px solid #e5e7eb; border-radius: 8px; }</style>
-    <div class="receipt-preview">${html}</div>
-    <div class="form-actions"><button class="primary-btn small-btn" data-action="paiement:print:${payment.id}">Imprimer (2 exemplaires)</button></div>`);
+  const { data, html } = receiptHtml(state, payment, 1, { duplicata });
+  return showDocumentPreview({
+    eyebrow: 'Reçu de paiement', title: `Reçu ${data.numero}`, subtitle: `${data.eleve} · ${formatMoney(data.montant)} ${state.config.devise} · impression A4 en 2 exemplaires (élève et comptabilité)${duplicata ? ' · duplicata' : ''}`,
+    html: `<div class="receipt-preview">${html}</div>`, css: `${RECEIPT_CSS} .receipt-preview .rc-sheet { height: auto; } .receipt-preview .rc-copy { border: 1px solid #e5e7eb; border-radius: 8px; }`,
+    fileName: receiptFileName(data.numero), print: (fileName) => printReceipt(state, payment.id, fileName, { duplicata })
+  });
+}
+
+export function showExpenseReceiptPreview(state, id) {
+  const doc = expenseReceiptHtml(state, id);
+  if (!doc) return false;
+  const d = doc.depense;
+  return showDocumentPreview({
+    eyebrow: 'Reçu de dépense', title: `Reçu ${d.numero}`, subtitle: `${d.beneficiaire || d.categorie} · ${formatMoney(d.montant)} ${state.config.devise}`,
+    html: doc.html, css: EXPENSE_RECEIPT_CSS, fileName: `Recu-${d.numero}`, print: (fileName) => printExpenseReceipt(state, d.id, fileName)
+  });
+}
+
+export function showBulletinPreview(state, paieId) {
+  const paie = state.paies.find((p) => p.id === Number(paieId));
+  if (!paie || !(paie.statut === 'validee' || paie.statut === 'payee')) return false;
+  return showDocumentPreview({
+    eyebrow: 'Bulletin de paie', title: `Bulletin ${paie.numero}`, subtitle: `${paie.calcul.employe.prenom} ${paie.calcul.employe.nom} · net ${formatMoney(paie.calcul.net)} ${state.config.devise}`,
+    html: `<div class="bp-doc">${bulletinHtml(state, paie)}</div>`, css: BULLETIN_CSS, fileName: `Bulletin-${paie.numero}`, print: (fileName) => printBulletins(state, [paie.id], fileName)
+  });
 }
 
 export function showDetail(state, kind, id) {

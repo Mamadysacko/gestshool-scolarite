@@ -1,7 +1,7 @@
 import { escapeHtml, formatMoney, formatDateFr, todayISO, downloadCsv, downloadExcel } from './utils.js';
 import { buildPeriodique, GRANULARITES } from './rapports-periodiques.js';
 import { buildJournalier, buildDepenses, buildTresorerie, buildEcheances } from './rapports-compta.js';
-import { studentName, scoped, pct, subtitle } from './rapports-utils.js';
+import { studentName, scoped, pct, subtitle, PERIODICITES, semaineDe } from './rapports-utils.js';
 import { categoriesInUse } from './depenses-view.js';
 import { CATEGORIES } from './classes.js';
 import { enteteLignes } from './entete.js';
@@ -10,6 +10,10 @@ import { printDocument } from './print.js';
 import { rappelsDus, DELAI_RAPPEL_JOURS } from './rappels.js';
 import { MODALITES, modaliteActuelle } from './modalites.js';
 import { enteteHtml } from './entete.js';
+import { telephoneFamille } from './contacts.js';
+
+// Nom de fichier lisible (sans accents ni caractères spéciaux) pour l'enregistrement en PDF
+const fichier = (x) => String(x).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w-]+/g, '-');
 
 export const REPORT_TYPES = [
   { id: 'periodique', label: 'Hebdo · Mensuel · Annuel' },
@@ -25,7 +29,7 @@ export const REPORT_TYPES = [
 
 export function defaultReportFilters(state) {
   const today = todayISO();
-  return { type: 'periodique', gran: 'mois', category: '', yearId: Number(state.anneeActiveId || 0), classId: 0, from: `${today.slice(0, 4)}-01-01`, to: today, search: '', categorieDepense: '', demandeur: '', dateRef: '' };
+  return { type: 'periodique', gran: 'mois', refJour: today, refSemaine: semaineDe(today), refMois: today.slice(0, 7), category: '', yearId: Number(state.anneeActiveId || 0), classId: 0, from: `${today.slice(0, 4)}-01-01`, to: today, search: '', categorieDepense: '', demandeur: '', dateRef: '' };
 }
 
 function daysBetween(fromIso, toIso) {
@@ -64,7 +68,7 @@ function buildRetards(state, f) {
   const items = lateItems(state, f);
   const rows = items.map(({ inscription, echeance, jours }) => {
     const s = studentOf(state, inscription);
-    return { cells: [s?.matricule || '—', studentName(state, inscription), classOf(state, inscription.classeId)?.nom || '—', labelEcheance(echeance), echeance.dateLimite, jours, echeanceReste(echeance), s?.telephone || s?.parent || '—'] };
+    return { cells: [s?.matricule || '—', studentName(state, inscription), classOf(state, inscription.classeId)?.nom || '—', labelEcheance(echeance), echeance.dateLimite, jours, echeanceReste(echeance), telephoneFamille(state, s) || s?.parent || '—'] };
   });
   const total = items.reduce((s, i) => s + echeanceReste(i.echeance), 0);
   return {
@@ -198,17 +202,20 @@ export function renderRapports(state, f) {
           <input type="search" data-rf="classe" list="rf-classes" placeholder="Toutes les classes" value="${escapeHtml(selectedClass?.nom || '')}" autocomplete="off" />
           <datalist id="rf-classes">${classes.map((c) => `<option value="${escapeHtml(c.nom)}"></option>`).join('')}</datalist>
         </label>
-        <label>Élève / matricule <input type="search" data-rf="search" placeholder="Nom ou IBK-…" value="${escapeHtml(f.search)}" autocomplete="off" /></label>
+        <label>Élève / matricule <input type="search" data-rf="search" placeholder="Nom ou matricule…" value="${escapeHtml(f.search)}" autocomplete="off" /></label>
         <label ${expenseTab ? '' : 'hidden'}>Catégorie de dépense
           <select data-rf="categorieDepense"><option value="">Toutes</option>${categoriesInUse(state).map((c) => `<option value="${escapeHtml(c)}" ${c === f.categorieDepense ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}</select>
         </label>
         <label ${f.type === 'depenses' ? '' : 'hidden'}>Demandeur <input type="search" data-rf="demandeur" value="${escapeHtml(f.demandeur)}" autocomplete="off" /></label>
         <label ${f.type === 'rappels' ? '' : 'hidden'}>Date de référence <input type="date" data-rf="dateRef" value="${escapeHtml(f.dateRef || todayISO())}" /></label>
-        <label ${f.type === 'periodique' || f.type === 'tresorerie' ? '' : 'hidden'}>Périodicité
-          <select data-rf="gran">${GRANULARITES.map((g) => `<option value="${g.id}" ${g.id === f.gran ? 'selected' : ''}>${g.label}</option>`).join('')}</select>
+        <label ${dated ? '' : 'hidden'}>Périodicité
+          <select data-rf="gran">${PERIODICITES.map(([k, l]) => `<option value="${k}" ${k === f.gran ? 'selected' : ''}>${l}</option>`).join('')}</select>
         </label>
-        <label ${dated ? '' : 'hidden'}>Du <input type="date" data-rf="from" value="${escapeHtml(f.from)}" /></label>
-        <label ${dated ? '' : 'hidden'}>Au <input type="date" data-rf="to" value="${escapeHtml(f.to)}" /></label>
+        <label ${dated && f.gran === 'jour' ? '' : 'hidden'}>Date <input type="date" data-rf="refJour" value="${escapeHtml(f.refJour || todayISO())}" /></label>
+        <label ${dated && f.gran === 'semaine' ? '' : 'hidden'}>Semaine <input type="week" data-rf="refSemaine" value="${escapeHtml(f.refSemaine || semaineDe(todayISO()))}" /></label>
+        <label ${dated && f.gran === 'mois' ? '' : 'hidden'}>Mois <input type="month" data-rf="refMois" value="${escapeHtml(f.refMois || todayISO().slice(0, 7))}" /></label>
+        <label ${dated && f.gran === 'perso' ? '' : 'hidden'}>Du <input type="date" data-rf="from" value="${escapeHtml(f.from)}" /></label>
+        <label ${dated && f.gran === 'perso' ? '' : 'hidden'}>Au <input type="date" data-rf="to" value="${escapeHtml(f.to)}" /></label>
       </div>
     </div>
     <div id="report-output"></div>`;
@@ -240,10 +247,10 @@ export function exportReport(state, f, format) {
 
 // Pied de page des rapports : date automatique et signatures de la comptable et du directeur général
 function signaturesHtml(config) {
-  const city = String(config.adresse || 'Conakry').split(',')[0].trim() || 'Conakry';
+  const city = String(config.adresse || '').split(',')[0].trim();
   const now = new Date();
   return `<footer class="r-signatures">
-    <p class="r-date">Fait à ${escapeHtml(city)}, le <b>${escapeHtml(formatDateFr(todayISO()))}</b> à ${now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
+    <p class="r-date">${city ? `Fait à ${escapeHtml(city)}, le` : 'Fait le'} <b>${escapeHtml(formatDateFr(todayISO()))}</b> à ${now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
     <div class="r-sign-row"><div><span>La Comptable</span></div><div><span>Le Directeur Général</span></div></div>
     <div class="r-footer">${escapeHtml(config.nom)} — document généré automatiquement</div>
   </footer>`;
@@ -270,7 +277,7 @@ export function printReport(state, f) {
     #print-root .r-sign-row{display:flex;justify-content:space-between;gap:40px;height:90px;margin:0 30px}
     #print-root .r-sign-row div{flex:1;max-width:260px;text-align:center;border-top:1px solid #111827;padding-top:5px;align-self:flex-end;font-weight:bold;font-size:12px}
     #print-root .r-footer{margin-top:14px;border-top:1px solid #d1d5db;padding-top:6px;font-size:10px;color:#6b7280;text-align:center}`;
-  return printDocument({ title: report.title, html, css, page: report.portrait ? 'A4 portrait' : 'A4 landscape' });
+  return printDocument({ title: report.title, html, css, page: report.portrait ? 'A4 portrait' : 'A4 landscape', fileName: fichier(`${report.title}-${todayISO()}`) });
 }
 
 // Changement d'onglet : les rapports à période démarrent sur l'année civile en cours, le journalier sur aujourd'hui
@@ -327,5 +334,5 @@ export function printReminders(state, f) {
   };
   const pages = [];
   for (let i = 0; i < items.length; i += 4) pages.push(`<div class="rm-page">${items.slice(i, i + 4).map(card).join('')}</div>`);
-  return printDocument({ title: 'Fiches de rappel', html: pages.join(''), css: REMINDER_CSS, margin: '0' });
+  return printDocument({ title: 'Fiches de rappel', html: pages.join(''), css: REMINDER_CSS, margin: '0', fileName: `Fiches-de-rappel-${f.dateRef || todayISO()}` });
 }

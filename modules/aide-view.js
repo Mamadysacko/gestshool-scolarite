@@ -1,8 +1,9 @@
 import { escapeHtml } from './utils.js';
 import { HELP_CATEGORIES, HELP_TOPICS, FAQ_IDS, SUGGESTED_QUESTIONS } from './aide-data.js';
-import { searchHelp, topicById, accessStatus } from './aide.js';
+import { searchHelp, topicById, accessStatus, roleCanTopic } from './aide.js';
 import { currentUser, allowedPages, ROLES } from './auth.js';
 import { pageLabel } from './navigation.js';
+import { editeurHtml } from './editeur.js';
 
 // Centre d'aide : recherche, catégories, fiches détaillées et accès direct aux fonctionnalités autorisées.
 const view = { query: '', categorie: '', page: '', topicId: '', active: -1 };
@@ -28,12 +29,12 @@ function pathHtml(topic) {
 }
 
 function rolesHtml(topic) {
-  return topic.roles.map((r) => `<span class="badge ${r === role() ? 'ok' : 'neutral'}">${escapeHtml(ROLES[r])}</span>`).join(' ');
+  return Object.keys(ROLES).filter((r) => roleCanTopic(topic, r)).map((r) => `<span class="badge ${r === role() ? 'ok' : 'neutral'}">${escapeHtml(ROLES[r])}</span>`).join(' ');
 }
 
 function resultItem(topic) {
   const cat = categoryOf(topic.categorie);
-  const allowed = topic.roles.includes(role());
+  const allowed = roleCanTopic(topic, role(), allowedPages());
   return `<li><button type="button" class="aide-result" data-aide-open="${topic.id}">
       <span class="aide-result-icon" aria-hidden="true">${cat.icon}</span>
       <span class="aide-result-body"><strong>${escapeHtml(topic.titre)}</strong>
@@ -90,7 +91,7 @@ function detailHtml(topic) {
     access = '<p class="meta">Cette fonctionnalité n’a pas de page dédiée : suivez les étapes ci-dessous.</p>';
   } else if (!status.roleOk) {
     access = `<div class="aide-access denied"><strong>Accès non autorisé avec votre rôle (${escapeHtml(ROLES[role()] || '—')}).</strong>
-      <p>Cette fonctionnalité est réservée à : ${topic.roles.map((r) => escapeHtml(ROLES[r])).join(', ')}. Demandez à un administrateur de l’effectuer ou de modifier votre rôle.</p></div>`;
+      <p>Cette fonctionnalité est réservée à : ${Object.keys(ROLES).filter((r) => roleCanTopic(topic, r)).map((r) => escapeHtml(ROLES[r])).join(', ')}. Demandez à un administrateur de l’effectuer ou de modifier votre rôle.</p></div>`;
   } else {
     access = `<div class="aide-access ${status.missing.length ? 'warning' : 'ready'}">
       ${status.missing.length ? `<strong>Avant de continuer, il manque :</strong><ul>${status.missing.map((p) => `<li>${escapeHtml(p.label)} — ${escapeHtml(p.texte)}${p.aide ? ` <button type="button" class="link-btn" data-aide-open="${p.aide}">Comment faire ?</button>` : ''}</li>`).join('')}</ul>` : '<strong>Tout est prêt : vous pouvez utiliser cette fonctionnalité.</strong>'}
@@ -172,7 +173,8 @@ export function renderAide(state) {
       </div>
       <div class="aide-chips">${SUGGESTED_QUESTIONS.slice(0, 4).map((q) => `<button type="button" class="aide-chip" data-aide-q="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join('')}</div>
     </div>
-    <div id="aide-output"></div>`;
+    <div id="aide-output"></div>
+    ${editeurHtml()}`;
   renderAideOutput();
 }
 
@@ -221,6 +223,9 @@ function goToTopic(id) {
   if (topic.clic) document.querySelector(topic.clic)?.click();
   const target = topic.focus ? document.querySelector(topic.focus) : null;
   if (!target) return;
+  // Élément situé dans un formulaire replié derrière son bouton : le formulaire est ouvert d'abord
+  const volet = target.closest('details.form-pli') || target.querySelector?.('details.form-pli');
+  if (volet && (volet.contains(target) || target.contains(volet))) volet.open = true;
   target.scrollIntoView({ behavior: 'smooth', block: 'center' });
   target.classList.add('aide-highlight');
   setTimeout(() => target.classList.remove('aide-highlight'), 2600);

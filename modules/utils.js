@@ -80,8 +80,15 @@ export function downloadBlob(filename, content, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// Une cellule texte commençant par = + - @ serait interprétée comme une formule par le tableur (injection) :
+// elle est neutralisée par une apostrophe. Les nombres restent des nombres.
+export function celluleSure(value) {
+  if (typeof value !== 'string') return value ?? '';
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}
+
 export function downloadCsv(filename, rows) {
-  const csv = rows.map((row) => row.map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
+  const csv = rows.map((row) => row.map((value) => `"${String(celluleSure(value)).replace(/"/g, '""')}"`).join(';')).join('\r\n');
   downloadBlob(filename, `﻿${csv}`, 'text/csv;charset=utf-8');
 }
 

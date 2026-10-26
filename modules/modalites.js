@@ -1,4 +1,6 @@
 import { paymentAllocations, allocate, ordreEcheances } from './allocation.js';
+import { ecartArrondi, regleArrondi } from './arrondi.js';
+import { repartirReduction } from './reductions.js';
 
 // Modalité de règlement d'une inscription : « par tranches » ou « mensuel ».
 // Elle est choisie lors du premier paiement (module Paiements), et non plus imposée à l'inscription.
@@ -31,8 +33,23 @@ export function totalTranches(tarif) {
   return (tarif?.tranches || []).reduce((s, t) => s + Number(t.montant || 0), 0);
 }
 
-export function totalMensuel(tarif) {
-  return Number(tarif?.montantMensuel || 0) * Number(tarif?.nbMois || 0);
+// Formule mensuelle d'un tarif : mensualité, dernière mensualité (écart d'arrondi absorbé) et total réel
+export function formuleMensuelle(state, tarif) {
+  const mensuel = Number(tarif?.montantMensuel || 0);
+  const nb = Number(tarif?.nbMois || 0);
+  const ajuste = mensuel > 0 && ecartArrondi(mensuel, nb, tarif?.montantAnnuel, regleArrondi(state?.config, 'mensualites'));
+  const dernier = ajuste ? Number(tarif.montantAnnuel) - mensuel * (nb - 1) : mensuel;
+  return { mensuel, nb, dernier, ajuste, total: mensuel * (nb - 1) + dernier };
+}
+
+// Texte « 9 × 83 000 (dernière 86 000) = 750 000 »
+export function texteMensuel(state, tarif, fmt) {
+  const m = formuleMensuelle(state, tarif);
+  return m.ajuste ? `${m.nb - 1} × ${fmt(m.mensuel)} + 1 × ${fmt(m.dernier)} = ${fmt(m.total)}` : `${m.nb} × ${fmt(m.mensuel)} = ${fmt(m.total)}`;
+}
+
+export function totalMensuel(tarif, state = null) {
+  return formuleMensuelle(state, tarif).total;
 }
 
 // Modalités proposables pour un tarif : chacune doit avoir des montants complets
@@ -62,9 +79,12 @@ export function buildEcheances(state, inscription, tarif, modalite) {
     const count = Math.min(Math.max(Number(tarif.nbMois || 0), 1), 12);
     const annee = state.annees.find((a) => a.id === inscription.anneeId);
     const start = tarif.moisDebut || annee?.dateDebut || '';
+    const mensuel = Number(tarif.montantMensuel);
+    // Écart dû au seul arrondi de la mensualité : la dernière mensualité l'absorbe (total = montant annuel exact)
+    const dernier = ecartArrondi(mensuel, count, tarif.montantAnnuel, regleArrondi(state.config, 'mensualites')) ? Number(tarif.montantAnnuel) - mensuel * (count - 1) : mensuel;
     return Array.from({ length: count }, (_, index) => {
       const dateLimite = start ? addMonths(start, index) : '';
-      return base({ trancheId: index + 1, montant: Number(tarif.montantMensuel), dateLimite, libelle: dateLimite ? monthLabel(dateLimite) : `Mensualité ${index + 1}`, mensualite: true });
+      return base({ trancheId: index + 1, montant: index === count - 1 ? dernier : mensuel, dateLimite, libelle: dateLimite ? monthLabel(dateLimite) : `Mensualité ${index + 1}`, mensualite: true });
     });
   }
   return (tarif.tranches || []).map((tranche, index) => base({
@@ -124,9 +144,16 @@ export function planPourModalite(state, inscription, modalite) {
   }
   const nouveaux = [...fraisEcheances(inscription), ...buildEcheances(state, inscription, tarif, modalite)];
   const changement = Boolean(inscription.modalite) && inscription.modalite !== modalite;
-  if (!paid) return { ok: true, echeances: nouveaux, regenerate: true, changement };
+  if (!paid) {
+    const reduite = repartirReduction(inscription, nouveaux);
+    if (!reduite.ok) return { ok: false, echeances: [], message: reduite.message };
+    return { ok: true, echeances: nouveaux, regenerate: true, changement };
+  }
   const result = reimputer(state, inscription, nouveaux);
   if (!result.ok) return { ok: false, echeances: [], message: result.message };
+  // Réduction de l'élève (remise, bourse, exonération) reportée sur la partie non payée du nouvel échéancier
+  const reduite = repartirReduction(inscription, result.echeances);
+  if (!reduite.ok) return { ok: false, echeances: [], message: reduite.message };
   return { ok: true, echeances: result.echeances, regenerate: true, changement: true, reimputations: result.allocations };
 }
 
@@ -160,5 +187,6 @@ export function echeancierProvisoire(state, inscription, tarif) {
   const frais = fraisEcheances(inscription);
   inscription.modalite = null;
   inscription.echeances = !tarif || !modalitesDisponibles(tarif).tranches ? frais : [...frais, ...buildEcheances(state, inscription, tarif, 'tranches')];
+  repartirReduction(inscription);
   return inscription;
 }

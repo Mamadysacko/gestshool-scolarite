@@ -89,7 +89,7 @@ export function renderAnalyseBody(state, f) {
     </div>
     <div class="panel">
       <div class="panel-header"><h3>Détail par ${escapeHtml(DIMENSIONS.find((d) => d.id === f.dim).label.toLowerCase())}</h3><span class="meta">${rows.length} ligne(s)${rows.length > shown.length ? ` — ${shown.length} affichées` : ''}</span></div>
-      <div class="table-wrap"><table>
+      <div class="table-wrap"><table class="data-list" data-list="analyse" data-list-title="Analyse financière détaillée">
         <thead><tr><th>${escapeHtml(DIMENSIONS.find((d) => d.id === f.dim).label)}</th><th>Inscrits</th><th>Attendu</th><th>Encaissé</th><th>Reste</th><th>Taux</th><th>À jour</th><th>Partiels</th><th>En retard</th></tr></thead>
         <tbody>${shown.map((r) => `<tr><td>${escapeHtml(r.label)}</td><td>${r.effectif}</td><td class="num">${money(r.attendu)}</td><td class="num">${money(r.encaisse)}</td><td class="num">${money(r.reste)}</td><td><span class="badge ${r.taux >= 75 ? 'ok' : 'warning'}">${r.taux}%</span></td><td>${r.soldes}</td><td>${r.partiels}</td><td>${r.retards}</td></tr>`).join('') || '<tr><td colspan="9">Aucune donnée pour cette sélection.</td></tr>'}</tbody>
       </table></div>

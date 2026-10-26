@@ -3,7 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>IBK - Gestion Scolaire</title>
+    <!-- Politique de sécurité : aucun script en ligne ni distant, aucune ressource extérieure ; images locales, data: et blob: (logos, pièces) -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
+    <meta name="author" content="SOCIÉTÉ KJS GROUP SARL" />
+    <title>GEST SCHOOL SCOLARITÉ — Gestion financière scolaire</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="./assets/gest-school-embleme-32.png" />
+    <link rel="apple-touch-icon" href="./assets/gest-school-embleme-180.png" />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
@@ -13,40 +18,39 @@
       <div class="sidebar-scrim" id="sidebarScrim"></div>
       <aside class="sidebar" id="sidebar">
         <div class="brand-block">
-          <div class="brand-badge">IBK</div>
-          <div>
-            <p class="brand-title">Gestion Scolaire</p>
-            <span class="brand-subtitle">Comptabilité &amp; scolarité</span>
+          <img class="brand-logo" src="./assets/gest-school-embleme-64.png" alt="" width="42" height="42" />
+          <div class="brand-text">
+            <p class="brand-title">GEST SCHOOL</p>
+            <span class="brand-subtitle">Scolarité · finances</span>
           </div>
+          <button class="sidebar-collapse" id="sidebarCollapse" type="button" aria-label="Réduire le menu" title="Réduire le menu" aria-expanded="true">«</button>
         </div>
 
-        <nav class="main-nav" aria-label="Menu principal">
-          <button class="nav-btn active" data-group="accueil">Tableau de bord</button>
-          <button class="nav-btn" data-group="eleves">Élèves</button>
-          <button class="nav-btn" data-group="scolarite">Scolarité</button>
-          <button class="nav-btn" data-group="paiements">Paiements</button>
-          <button class="nav-btn" data-group="depenses">Dépenses</button>
-          <button class="nav-btn" data-group="rapports">Rapports</button>
-          <button class="nav-btn" data-group="administration">Administration</button>
-        </nav>
+        <!-- Menu principal généré à partir de modules/navigation.js (source unique des rubriques) -->
+        <nav class="main-nav" id="mainNav" aria-label="Menu principal"></nav>
 
-        <div class="sidebar-actions">
-          <span id="roleLabel" class="role-label"></span>
-          <button id="exportDataBtn" class="secondary-btn">Exporter JSON</button>
-          <label class="file-import" id="importLabel">
-            <input type="file" id="importDataInput" accept=".note,.json,.txt" />
-            Importer JSON
-          </label>
-          <button id="logoutBtn" class="secondary-btn">Se déconnecter</button>
+        <!-- Sauvegarde et restauration : rubrique « Sauvegardes et restauration » (plus de boutons dans la barre) -->
+        <div class="sidebar-footer">
+          <button id="dataFileChip" class="datafile-chip" type="button" hidden></button>
+          <div class="user-card">
+            <span class="user-avatar" id="userAvatar" aria-hidden="true"></span>
+            <div class="user-text"><b id="userName"></b><span id="roleLabel" class="role-label"></span></div>
+            <button id="logoutBtn" class="logout-btn" type="button" title="Se déconnecter" aria-label="Se déconnecter"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
+          </div>
         </div>
       </aside>
 
       <main class="main-panel">
         <header class="topbar">
           <div>
-            <p class="eyebrow">École IBK</p>
+            <p class="eyebrow" id="schoolName">Établissement non configuré</p>
             <h1 id="pageTitle">Tableau de bord</h1>
           </div>
+          <div class="quick-search" role="search">
+            <input type="search" id="quickSearch" placeholder="Rechercher : élève, matricule, n° de reçu…" aria-label="Recherche rapide" autocomplete="off" />
+            <ul class="quick-results" id="quickResults" hidden></ul>
+          </div>
+          <div class="year-switch" id="yearSwitch" title="Les données affichées sont celles de l’année active"></div>
           <button class="help-btn" id="helpBtn" type="button" title="Aide sur cette page" aria-label="Aide sur cette page">?</button>
           <div class="top-actions">
             <button class="primary-btn" data-open="new-eleve">+ Nouvel élève</button>
@@ -63,10 +67,27 @@
         <section id="inscriptions" class="content-section hidden"></section>
         <section id="tarifs" class="content-section hidden"></section>
         <section id="paiements" class="content-section hidden"></section>
+        <section id="creances" class="content-section hidden"></section>
+        <section id="comptes" class="content-section hidden"></section>
+        <section id="caisse" class="content-section hidden"></section>
+        <section id="etats" class="content-section hidden"></section>
+        <section id="licences" class="content-section hidden"></section>
+        <section id="encaissements-analyse" class="content-section hidden"></section>
         <section id="dettes" class="content-section hidden"></section>
         <section id="depenses" class="content-section hidden"></section>
+        <section id="paie-dashboard" class="content-section hidden"></section>
+        <section id="personnel" class="content-section hidden"></section>
+        <section id="affectations" class="content-section hidden"></section>
+        <section id="remunerations" class="content-section hidden"></section>
+        <section id="paie" class="content-section hidden"></section>
+        <section id="avances" class="content-section hidden"></section>
+        <section id="paie-rapports" class="content-section hidden"></section>
         <section id="rapports" class="content-section hidden"></section>
         <section id="config" class="content-section hidden"></section>
+        <section id="config-utilisateurs" class="content-section hidden"></section>
+        <section id="config-finances" class="content-section hidden"></section>
+        <section id="config-donnees" class="content-section hidden"></section>
+        <section id="config-journal" class="content-section hidden"></section>
         <section id="aide" class="content-section hidden"></section>
       </main>
     </div>
@@ -75,6 +96,19 @@
     <div id="modal-root"></div>
     <div id="toast" class="toast hidden"></div>
 
-    <script defer src="./offline-app.js"></script>
+    <!-- Application découpée en fichiers thématiques (générés par build-offline.js), chargés dans l’ordre -->
+    <script defer src="./application/01-noyau-utilitaires.js"></script>
+    <script defer src="./application/02-securite-navigation.js"></script>
+    <script defer src="./application/03-annees-classes-tarifs.js"></script>
+    <script defer src="./application/04-eleves-inscriptions.js"></script>
+    <script defer src="./application/05-paiements-recus.js"></script>
+    <script defer src="./application/06-dettes-rappels.js"></script>
+    <script defer src="./application/07-depenses-tresorerie.js"></script>
+    <script defer src="./application/08-paie-personnel.js"></script>
+    <script defer src="./application/09-tableaux-de-bord-analyses.js"></script>
+    <script defer src="./application/10-rapports-exports.js"></script>
+    <script defer src="./application/11-administration-sauvegardes.js"></script>
+    <script defer src="./application/12-centre-aide.js"></script>
+    <script defer src="./application/13-demarrage-application.js"></script>
   </body>
 </html>

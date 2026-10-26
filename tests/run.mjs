@@ -1,3 +1,4 @@
+import { etatDemo } from './donnees-demo.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { sha256Hex } from '../modules/auth.js';
@@ -8,10 +9,10 @@ import { echeancierSituation, previewPaiement } from '../modules/allocation.js';
 import { createDepense, cancelDepense, updateDepense } from '../modules/depenses.js';
 import { situationCaisse } from '../modules/tresorerie.js';
 import { createInscription, generateEcheancesForInscription } from '../modules/inscriptions.js';
-import { propagateTarif } from '../modules/tarifs.js';
+import { propagateTarif, createTarif } from '../modules/tarifs.js';
 import { createClasse } from '../modules/classes.js';
 import { withTransaction } from '../modules/transaction.js';
-import { reporterReliquats, situationReliquat, detteRestante } from '../modules/reliquats.js';
+import { soldesReportables, reporterSoldes, situationReliquat, detteRestante } from '../modules/reliquats.js';
 import { rappelsDus } from '../modules/rappels.js';
 
 let n = 0;
@@ -26,7 +27,7 @@ t('sha256 identique à node:crypto', () => {
 });
 
 function fresh() {
-  const s = migrateState({});
+  const s = etatDemo();
   s.paiements = []; s.depenses = [];
   s.inscriptions[0].echeances.forEach((e) => { e.montantPaye = 0; });
   refreshStatuses(s);
@@ -254,16 +255,22 @@ t('frais d’inscription et de réinscription : montant de l’année, enregistr
   assert.deepEqual(p.allocations.map((a) => [a.libelle, a.montant]), [['Frais de réinscription', 30000], ['1ère tranche', 70000]]);
 });
 
-t('dettes antérieures : report automatique, règlement tracé, sans double comptage', () => {
+t('dettes antérieures : report explicite seulement, origine conservée, règlement tracé, sans double comptage', () => {
   const s = fresh();
   pay(s, 600000); // Aminata 2025-2026 : reste 300 000
   const c = anneeSuivante(s);
   const re = createInscription(s, { eleveId: 1, anneeId: 2, classeId: c.id });
   generateEcheancesForInscription(s, re.id, s.tarifs[1]);
-  assert.equal(reporterReliquats(s).length, 1);
-  assert.equal(reporterReliquats(s).length, 0); // idempotent : jamais reporté deux fois
+  // la réinscription ne reporte rien d'elle-même : le solde est seulement proposé au report
+  assert.equal((s.reliquats || []).length, 0);
+  const reportables = soldesReportables(s, 2);
+  assert.deepEqual(reportables.map((x) => [x.inscription.id, x.total, x.paye, x.reste, x.inscritCible]), [[1, 900000, 600000, 300000, true]]);
+  assert.equal(reporterSoldes(s, 2, [1]).length, 1);
+  assert.equal(reporterSoldes(s, 2, [1]).length, 0); // jamais reporté deux fois
+  assert.equal(soldesReportables(s, 2).length, 0);
+  assert.throws(() => reporterSoldes(s, 1, [re.id]), /année antérieure/);
   const r = s.reliquats[0];
-  assert.deepEqual([r.montantReporte, r.anneeOrigineId, r.anneeReportId], [300000, 1, 2]);
+  assert.deepEqual([r.montantInitial, r.regleAvantReport, r.montantReporte, r.anneeOrigineId, r.anneeReportId], [900000, 600000, 300000, 1, 2]);
   // clôture de l'année d'origine : le règlement de la dette reste possible
   s.annees[0].statut = 'cloturee';
   const reg = createPaiement(s, { inscriptionId: 1, montant: 100000, datePaiement: today, reliquatId: r.id });
@@ -320,16 +327,22 @@ t('mensuel indisponible sans montant mensuel ; inscription sans tarif payable ap
   assert.ok(j);
 });
 
-t('modification de tarif répercutée : sans paiement → échéancier reconstruit, avec paiement → mois non payés', () => {
+t('modification de tarif non rétroactive : élève ayant payé inchangé, élève sans paiement réaligné', () => {
   const s = fresh();
   const i = inscrireMoussa(s);
-  createPaiement(s, { inscriptionId: 1, montant: 300000, datePaiement: today, modalite: 'tranches' });
   createPaiement(s, { inscriptionId: i.id, montant: 110000, datePaiement: today, modalite: 'mensuel' });
+  const avant = structuredClone(i.echeances);
+  const c = s.classes.find((x) => x.id === i.classeId);
+  s.eleves.push({ id: 99, matricule: 'T-99', nom: 'Test', prenom: 'Sans paiement', actif: true });
+  const k = createInscription(s, { eleveId: 99, anneeId: 1, classeId: c.id });
   s.tarifs[0].montantMensuel = 120000;
-  propagateTarif(s, s.tarifs[0]);
+  s.tarifs[0].tranches[2].montant = 350000;
+  s.tarifs[0].montantAnnuel = 950000;
+  const r = propagateTarif(s, s.tarifs[0]);
   refreshStatuses(s);
-  assert.equal(i.echeances[0].montant, 110000); // mois déjà payé : inchangé
-  assert.ok(i.echeances.slice(1).every((e) => e.montant === 120000));
+  assert.deepEqual(i.echeances.map((e) => e.montant), avant.map((e) => e.montant)); // engagement conservé
+  assert.equal(r.preservees >= 1, true);
+  assert.equal(k.echeances.filter((e) => e.type !== 'frais').reduce((t, e) => t + e.montant, 0), 950000); // réaligné
 });
 
 t('changement d’année: le paiement reste rattaché à son année', () => {
@@ -357,7 +370,7 @@ t('dépenses, solde disponible et période', () => {
   const d = createDepense(s, { anneeId: 1, categorie: 'Divers', description: 'Craie', montant: 20000, date: today, demandeur: 'Directeur' });
   assert.match(d.numero, /^DEP-\d{4}-000001$/);
   let c = situationCaisse(s, { yearId: 1 });
-  assert.deepEqual(c, { ouverture: 50000, recettes: 300000, depenses: 20000, solde: 330000 });
+  assert.deepEqual(c, { ouverture: 50000, recettes: 300000, autres: 0, depenses: 20000, solde: 330000 });
   c = situationCaisse(s, { yearId: 1, from: '2999-01-01' });
   assert.equal(c.ouverture, 330000);
   assert.equal(c.solde, 330000);
@@ -375,13 +388,21 @@ t('correction de dépense garde l’historique', () => {
   assert.equal(s.depenses[0].historique[0].avant.montant, 100);
 });
 
-t('remise à zéro conserve config et années', () => {
+t('remise à zéro complète : données et paramètres effacés, identifiant d’établissement conservé', () => {
   const s = fresh(); pay(s, 1000);
   const b = blankState(s);
   assert.equal(b.paiements.length, 0);
   assert.equal(b.eleves.length, 0);
-  assert.equal(b.annees.length, 1);
-  assert.equal(b.config.nom, s.config.nom);
+  assert.equal(b.annees.length, 0);
+  assert.equal(b.anneeActiveId, null);
+  assert.deepEqual([b.config.nom, b.config.devise, b.journal.length], ['', '', 0]);
+  assert.equal(b.config.etablissementId, s.config.etablissementId);
+  // sans année : aucune classe, inscription ni tarif ne peut être créé
+  assert.equal(createClasse(b, { nom: '6e A', categorie: 'Collège' }), null);
+  assert.equal(createTarif(b, { classeId: 1, montantAnnuel: 1000 }), null);
+  assert.equal(createInscription(b, { eleveId: 1, classeId: 1 }), null);
+  // l'état vide reste stable après migration (pas d'année recréée)
+  assert.equal(migrateState(structuredClone(b)).annees.length, 0);
 });
 
 console.log(`${n} tests passés`);

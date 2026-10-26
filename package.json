@@ -1,0 +1,95 @@
+{
+  "name": "gestschool-scolarite",
+  "productName": "GEST SCHOOL SCOLARITÉ",
+  "version": "4.2.0",
+  "description": "Gestion financière et comptable des établissements scolaires",
+  "author": {
+    "name": "SOCIÉTÉ KJS GROUP SARL",
+    "email": "kjsgroup2025@gmail.com"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "build": "node build-offline.js",
+    "start": "node build-offline.js && electron .",
+    "test": "node tests/tout.mjs",
+    "icone": "node build/creer-icone.mjs",
+    "dist": "node build-offline.js && node build/creer-icone.mjs && electron-builder --win --x64",
+    "publier": "node scripts/publier-version.mjs"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.10"
+  },
+  "devDependencies": {
+    "electron": "44.6.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.kjsgroup.gestschool.scolarite",
+    "productName": "GEST SCHOOL SCOLARITÉ",
+    "executableName": "GEST-SCHOOL-SCOLARITE",
+    "copyright": "© 2026 SOCIÉTÉ KJS GROUP SARL",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "enableCookieEncryption": true
+    },
+    "files": [
+      "index.html",
+      "style.css",
+      "application/**",
+      "assets/**",
+      "electron/**",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "GEST SCHOOL SCOLARITÉ",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "artifactName": "GEST-SCHOOL-SCOLARITE-${version}-installation.${ext}",
+      "uninstallDisplayName": "GEST SCHOOL SCOLARITÉ",
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "GEST-SCHOOL-SCOLARITE-${version}-portable.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://mises-a-jour.invalid/gestscolarite",
+        "publishAutoUpdate": true
+      }
+    ]
+  }
+}

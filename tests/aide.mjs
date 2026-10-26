@@ -1,3 +1,4 @@
+import { etatDemo } from './donnees-demo.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { searchHelp, accessStatus, evaluatePrerequisites, topicById, unavailableMatches } from '../modules/aide.js';
@@ -41,7 +42,15 @@ t('questions en langage naturel → bonne fiche en tête', () => {
     'dette de l\'année dernière': 'dettes-anterieures',
     'frais de réinscription': 'frais-inscription',
     'fiche de rappel': 'retards-rappels',
-    'rapport journalier': 'rapports-export'
+    'rapport journalier': 'rapports-export',
+    'Où ajouter une matière ?': 'gerer-matieres',
+    'Comment affecter un enseignant à une classe ?': 'affecter-enseignant',
+    'imprimer les bulletins de paie': 'bulletins-paie',
+    'Quels sont les prérequis pour générer un bulletin ?': 'bulletins-paie',
+    'payer les salaires du mois': 'preparer-paie',
+    'avance sur salaire': 'avances-salaire',
+    'ajouter un gardien': 'gerer-personnel',
+    'masse salariale': 'tableau-paie'
   };
   Object.entries(cases).forEach(([q, expected]) => assert.equal(top(q), expected, `« ${q} » → ${top(q)}`));
 });
@@ -53,7 +62,7 @@ t('fautes de frappe et sans accents', () => {
 });
 
 t('fonctionnalités absentes signalées honnêtement, sans résultat fictif', () => {
-  for (const q of ['Comment calculer les moyennes ?', 'Où ajouter une matière ?', 'Comment affecter un enseignant à une classe ?', 'Quels sont les prérequis pour générer un bulletin ?', 'emploi du temps']) {
+  for (const q of ['Comment calculer les moyennes ?', 'Comment imprimer le bulletin scolaire ?', 'emploi du temps', 'saisir les notes du trimestre']) {
     const r = searchHelp(q);
     assert.ok(r.unavailable.length > 0, `aucune absence signalée pour « ${q} »`);
     assert.equal(r.results.length, 0, `résultats inattendus pour « ${q} » : ${r.results.map((x) => x.topic.id)}`);
@@ -106,7 +115,7 @@ t('documentation synchronisée avec l’application réelle', () => {
 });
 
 t('prérequis évalués sur les données réelles', () => {
-  const s = migrateState({});
+  const s = etatDemo();
   const pay = topicById('enregistrer-paiement');
   assert.equal(evaluatePrerequisites(s, pay).find((p) => p.check === 'payable').ok, true);
   // une inscription sans échéancier reste payable si sa classe a un tarif (l'échéancier est créé au paiement)
@@ -123,7 +132,7 @@ t('prérequis évalués sur les données réelles', () => {
 });
 
 t('permissions : un rôle non autorisé n’obtient jamais de lien', () => {
-  const s = migrateState({});
+  const s = etatDemo();
   assert.equal(accessStatus(s, topicById('enregistrer-paiement'), 'lecture', ROLE_PAGES.lecture).navigable, false);
   assert.equal(accessStatus(s, topicById('reinitialiser'), 'comptable', ROLE_PAGES.comptable).navigable, false);
   assert.equal(accessStatus(s, topicById('rapports-export'), 'lecture', ROLE_PAGES.lecture).navigable, true);

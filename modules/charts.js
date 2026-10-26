@@ -67,3 +67,27 @@ export function classBars(rows) {
     <span class="hbar-val">${r.rate}%</span></div>`).join('')}</div>`;
 }
 
+
+// Courbes à plusieurs séries (ex. période sélectionnée / période précédente, encaissements / dépenses).
+// points : [{ label, full, values: [v1, v2…] }] ; series : [{ name, color, dashed }]
+export function multiLineChart(points, series, devise) {
+  if (!points.length) return '<p class="meta">Aucune donnée pour cette période.</p>';
+  const w = 560; const h = 240; const left = 56; const top = 12; const bottom = 196;
+  const max = Math.max(...points.flatMap((p) => p.values), 100);
+  const x = (i) => left + (points.length === 1 ? (w - left - 14) / 2 : (w - left - 14) * i / (points.length - 1));
+  const y = (v) => bottom - (bottom - top) * v / max;
+  const step = Math.ceil(points.length / 8);
+  const lines = series.map((s, k) => {
+    const path = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.values[k] || 0).toFixed(1)}`).join(' ');
+    const dots = points.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.values[k] || 0).toFixed(1)}" r="${points.length > 40 ? 0 : 3}" fill="${s.color}" stroke="#fff" stroke-width="1.5"><title>${escapeHtml(p.full || p.label)} — ${escapeHtml(s.name)} : ${formatMoney(p.values[k] || 0)} ${escapeHtml(devise)}</title></circle>`).join('');
+    return `<path d="${path}" fill="none" stroke="${s.color}" stroke-width="2.4" stroke-linejoin="round" ${s.dashed ? 'stroke-dasharray="6 5"' : ''}/>${dots}`;
+  }).join('');
+  const area = series[0] ? `<path d="${points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.values[0] || 0).toFixed(1)}`).join(' ')} L${x(points.length - 1).toFixed(1)},${bottom} L${x(0).toFixed(1)},${bottom} Z" fill="${series[0].color}" opacity=".08"/>` : '';
+  const labels = points.map((p, i) => ((i % step === 0 && points.length - 1 - i >= step * 0.6) || i === points.length - 1 ? `<text x="${x(i).toFixed(1)}" y="220" text-anchor="${i === points.length - 1 && points.length > 1 ? 'end' : 'middle'}" font-size="12" fill="${COLORS.ink}">${escapeHtml(p.label)}</text>` : '')).join('');
+  return chartFrame(`${yGrid(max, w, top, bottom, left)}${area}${lines}${labels}`, w, h);
+}
+
+// Légende courte pour les graphiques à plusieurs séries
+export function legendHtml(series) {
+  return `<ul class="legend inline">${series.map((s) => `<li><i style="background:${s.color}${s.dashed ? ';opacity:.6' : ''}"></i>${escapeHtml(s.name)}</li>`).join('')}</ul>`;
+}

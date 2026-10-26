@@ -1,7 +1,0 @@
-{
-  "task_id": "task-ibk-ameliorations",
-  "task_description": "6 améliorations majeures du système de gestion scolaire IBK : thème orange/blanc/violet, inscription automatique à la création d'un élève avec matricule auto-généré, tableau de bord enrichi avec graphiques CSS purs et alertes, onglet rapports par période avec impression/CSV, reçu de paiement enrichi avec restes tranche et annuel, recherche par matricule dans les paiements.",
-  "status": "pending",
-  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
-  "blocked_reason": null
-}

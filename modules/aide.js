@@ -1,4 +1,5 @@
 import { HELP_TOPICS, HELP_CATEGORIES, UNAVAILABLE, CHECKS, FAQ_IDS } from './aide-data.js';
+import { roleOf, estRoleAdmin } from './auth.js';
 
 // Moteur de recherche du centre d'aide : questions en langage naturel, mots-clés, synonymes,
 // préfixes (« inscri » → inscription) et fautes de frappe légères. Aucun appel réseau.
@@ -169,9 +170,20 @@ export function evaluatePrerequisites(state, topic) {
 }
 
 // Accès à la fonctionnalité : rôle, page autorisée, prérequis obligatoires manquants
+// Accès d'un rôle (de base ou personnalisé) à une fiche : selon le niveau requis (consultation, saisie,
+// administration) et les pages que le rôle peut ouvrir. Les rôles étant modifiables, on se fonde sur leurs droits réels.
+export function roleCanTopic(topic, roleId, pages = null) {
+  if (!roleId) return false;
+  const def = roleOf(roleId);
+  const need = topic.roles.includes('lecture') ? 'read' : topic.roles.includes('comptable') ? 'write' : 'admin';
+  const allowed = estRoleAdmin(roleId) || need === 'read' || (need === 'write' && Boolean(def?.write));
+  const list = pages || def?.pages || [];
+  return allowed && (!topic.page || list.includes(topic.page));
+}
+
 export function accessStatus(state, topic, role, allowedPages) {
   const prereqs = evaluatePrerequisites(state, topic);
   const missing = prereqs.filter((p) => p.obligatoire && !p.ok);
-  const roleOk = Boolean(role) && topic.roles.includes(role) && (!topic.page || allowedPages.includes(topic.page));
+  const roleOk = roleCanTopic(topic, role, allowedPages);
   return { roleOk, navigable: Boolean(topic.page) && roleOk, missing, prereqs };
 }

@@ -1,6 +1,7 @@
 // Impression via #print-root (masqué à l'écran, seul visible à l'impression, cf. style.css).
 // Chaque document apporte sa propre règle @page ; elle est remplacée à chaque impression.
-export function printDocument({ title, html, css = '', page = 'A4 portrait', margin = '12mm' }) {
+// `fileName` : nom proposé par le navigateur pour « Enregistrer au format PDF » (titre du document pendant l'impression)
+export function printDocument({ title, html, css = '', page = 'A4 portrait', margin = '12mm', fileName = '' }) {
   const root = document.getElementById('print-root');
   if (!root) return false;
   root.innerHTML = `<div class="print-document" data-print-title="${String(title).replace(/"/g, '&quot;')}">
@@ -28,6 +29,15 @@ export function printDocument({ title, html, css = '', page = 'A4 portrait', mar
     img.addEventListener('error', resolve, { once: true });
   })));
   const timeout = new Promise((resolve) => setTimeout(resolve, 3000));
-  Promise.race([Promise.all(loaded), timeout]).then(() => window.print());
+  const previousTitle = document.title;
+  const restore = () => { document.title = previousTitle; window.removeEventListener('afterprint', restore); };
+  Promise.race([Promise.all(loaded), timeout]).then(() => {
+    if (fileName) {
+      document.title = String(fileName).replace(/[\/:*?"<>|]+/g, '-');
+      window.addEventListener('afterprint', restore);
+      setTimeout(restore, 60000);
+    }
+    window.print();
+  });
   return true;
 }

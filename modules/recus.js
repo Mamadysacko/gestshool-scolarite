@@ -5,8 +5,11 @@ import { MODALITES, modaliteActuelle } from './modalites.js';
 import { ensureReceiptNumber } from './paiements.js';
 import { printDocument } from './print.js';
 import { enteteHtml } from './entete.js';
+import { compteLabel } from './comptes.js';
 
-const MODES = { espece: 'Espèces', virement: 'Virement', cheque: 'Chèque', mobile_money: 'Mobile Money', carte: 'Carte' };
+const MODES = { espece: 'Espèces', virement: 'Virement bancaire', cheque: 'Chèque', mobile_money: 'Mobile Money', carte: 'Carte bancaire' };
+// Deux exemplaires sur une feuille A4 : l'un est remis au payeur, l'autre est conservé par la comptabilité
+export const EXEMPLAIRES = ['Exemplaire élève / famille', 'Exemplaire comptabilité'];
 
 function capitalize(text) {
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
@@ -62,6 +65,8 @@ export function buildReceiptData(state, payment) {
     numero: payment.numeroRecu,
     date: payment.datePaiement,
     payeur: payment.payeur || '',
+    // Payeur affiché : celui saisi, sinon le parent / tuteur, sinon l'élève
+    payeurNom: payment.payeur || student?.parent || (student ? `${student.prenom} ${student.nom}` : '—'),
     eleve: student ? `${student.prenom} ${student.nom}` : '—',
     matricule: student?.matricule || '—',
     classe: classe?.nom || '—',
@@ -74,6 +79,10 @@ export function buildReceiptData(state, payment) {
     reference: payment.reference && payment.reference !== payment.numeroRecu ? payment.reference : '',
     motif: payment.motifPaiement || 'Frais de scolarité',
     caissier: payment.caissier || '',
+    agent: payment.utilisateur || payment.caissier || '',
+    heure: payment.heure || '',
+    compte: compteLabel(state, payment.compteId),
+    observation: payment.observation || '',
     progression,
     reimpute,
     dette: payment.reliquatId ? { origine: yearLabel(state, payment.anneeId), encaissement: yearLabel(state, payment.anneeEncaissementId) } : null,
@@ -95,11 +104,12 @@ export function progressBarHtml(progression, modalite) {
     </div>`;
 }
 
-function receiptCopyHtml(config, d) {
+function receiptCopyHtml(config, d, exemplaire = '', duplicata = false) {
   const devise = escapeHtml(config.devise);
   return `<section class="rc-copy">
+    ${exemplaire || duplicata ? `<div class="rc-exemplaire">${escapeHtml(exemplaire)}${duplicata ? ' — DUPLICATA (réimpression, aucun nouveau paiement)' : ''}</div>` : ''}
     ${enteteHtml(config, { compact: true })}
-    <div class="rc-titlebar"><h2>${d.dette ? 'Reçu — dette antérieure' : 'Reçu de paiement'}</h2><div><b>N° ${escapeHtml(d.numero)}</b><span>Date : ${escapeHtml(formatDateFr(d.date))}</span></div></div>
+    <div class="rc-titlebar"><h2>${d.dette ? 'Reçu — dette antérieure' : 'Reçu de paiement'}</h2><div><b>N° ${escapeHtml(d.numero)}</b><span>Date : ${escapeHtml(formatDateFr(d.date))}${d.heure ? ` à ${escapeHtml(d.heure)}` : ''}</span></div></div>
     <div class="rc-columns">
       <div class="rc-box">
         <h3>Élève</h3>
@@ -107,20 +117,22 @@ function receiptCopyHtml(config, d) {
         <p><b>Matricule : ${escapeHtml(d.matricule)}</b></p>
         <p><b>Classe : <span class="rc-upper">${escapeHtml(d.classe)}</span></b>${d.categorie ? ` <span class="rc-muted">(${escapeHtml(d.categorie)})</span>` : ''}</p>
         <p>Année scolaire : ${escapeHtml(d.annee)}</p>
-        ${d.payeur ? `<p>Payé par : ${escapeHtml(d.payeur)}</p>` : ''}
+        <p>Payeur : <b>${escapeHtml(d.payeurNom)}</b></p>
       </div>
       <div class="rc-box">
         <h3>Paiement</h3>
+        <p class="rc-muted">Bénéficiaire : ${escapeHtml(config.nom)}</p>
         <p class="rc-amount">${formatMoney(d.montant)} ${devise}</p>
         <p class="rc-words">${escapeHtml(amountInWords(d.montant, config.devise))}</p>
-        <p>Moyen : <b>${escapeHtml(d.moyen)}</b>${d.reference ? ` · Réf. ${escapeHtml(d.reference)}` : ''}</p>
+        <p>Moyen : <b>${escapeHtml(d.moyen)}</b>${d.reference ? ` · Réf. transaction : ${escapeHtml(d.reference)}` : ''}</p>
+        <p>Compte : ${escapeHtml(d.compte)} · Agent : <b>${escapeHtml(d.agent || '—')}</b></p>
         ${d.dette ? `<p>Dette de l’année <b>${escapeHtml(d.dette.origine)}</b> · encaissée en ${escapeHtml(d.dette.encaissement)}</p>` : `<p>Modalité : <b>${escapeHtml(MODALITES[d.modalite] || '')}</b>${d.reimpute ? ' <span class="rc-muted">(réimputé après changement)</span>' : ''}</p>`}
         <p>Période concernée : <b>${escapeHtml(d.periode)}</b></p>
       </div>
     </div>
     ${progressBarHtml(d.progression, d.modalite)}
     <div class="rc-totals">
-      <div><span>Total de la scolarité</span><b>${formatMoney(d.progression.total)} ${devise}</b></div>
+      <div><span>Montant attendu</span><b>${formatMoney(d.progression.total)} ${devise}</b></div>
       <div><span>Cumul payé</span><b>${formatMoney(d.progression.cumul)} ${devise}</b></div>
       <div class="rc-due"><span>Reste à payer</span><b>${formatMoney(d.progression.reste)} ${devise}</b></div>
     </div>
@@ -173,20 +185,23 @@ export const RECEIPT_CSS = `
   .rc-doc .rc-foot { text-align: center; font-size: 8.5px; font-style: italic; color: #4b5563; }
 `;
 
-export function receiptHtml(state, payment, copies = 2) {
+// `duplicata` : réimpression d'un reçu déjà émis (même numéro, aucun nouveau paiement n'est créé)
+export function receiptHtml(state, payment, copies = 2, { duplicata = false } = {}) {
   const data = buildReceiptData(state, payment);
-  const copy = receiptCopyHtml(state.config, data);
-  return { data, html: `<div class="rc-doc"><div class="rc-sheet">${Array.from({ length: copies }, () => copy).join('')}</div></div>` };
+  const html = Array.from({ length: copies }, (_, i) => receiptCopyHtml(state.config, data, copies > 1 ? EXEMPLAIRES[i] || '' : '', duplicata)).join('');
+  return { data, html: `<div class="rc-doc"><div class="rc-sheet">${html}</div></div>` };
 }
 
 // Retourne false si le paiement est introuvable/annulé. Peut attribuer un numéro à un ancien paiement
 // qui n'en avait pas : l'appelant doit alors sauvegarder l'état (le numéro ne change plus ensuite).
-export function printReceipt(state, paymentId) {
+export const receiptFileName = (numero) => `Recu-${numero}`;
+
+export function printReceipt(state, paymentId, fileName = '', { duplicata = false } = {}) {
   const payment = state.paiements.find((p) => p.id === Number(paymentId));
   if (!payment || payment.annule) return false;
   ensureReceiptNumber(state, payment);
-  const { data, html } = receiptHtml(state, payment);
-  return printDocument({ title: `Reçu ${data.numero}`, html, css: RECEIPT_CSS, margin: '0' });
+  const { data, html } = receiptHtml(state, payment, 2, { duplicata });
+  return printDocument({ title: `Reçu ${data.numero}`, html, css: RECEIPT_CSS, margin: '0', fileName: fileName || receiptFileName(data.numero) });
 }
 
 // ── Facture de scolarité : calculée à partir du tarif, de la modalité et des paiements validés ──
@@ -257,5 +272,5 @@ export function invoiceHtml(state, inscription) {
 export function printInvoice(state, inscriptionId) {
   const inscription = state.inscriptions.find((i) => i.id === Number(inscriptionId));
   if (!inscription || !(inscription.echeances || []).length) return false;
-  return printDocument({ title: `Facture ${invoiceNumber(state, inscription)}`, html: invoiceHtml(state, inscription), css: `${RECEIPT_CSS}${INVOICE_CSS}`, margin: '10mm' });
+  return printDocument({ title: `Facture ${invoiceNumber(state, inscription)}`, html: invoiceHtml(state, inscription), css: `${RECEIPT_CSS}${INVOICE_CSS}`, margin: '10mm', fileName: `Facture-${invoiceNumber(state, inscription)}` });
 }

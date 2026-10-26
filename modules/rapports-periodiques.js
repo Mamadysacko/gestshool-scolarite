@@ -3,6 +3,8 @@ import { scopeInscriptions, inRange, sumPayments, inscriptionSituation, classOf,
 import { COLORS, MONTHS, lineChart, groupedBars, donut } from './charts.js';
 import { paymentAllocations } from './allocation.js';
 import { MODALITES, modaliteActuelle } from './modalites.js';
+import { recettesFiltrees } from './tresorerie.js';
+import { periodeDuRapport, granulariteTableau, PERIODICITES } from './rapports-utils.js';
 
 const MOYENS = { espece: 'Espèces', virement: 'Virement', cheque: 'Chèque', mobile_money: 'Mobile Money', carte: 'Carte' };
 
@@ -97,12 +99,14 @@ function distribution(payments, inscriptionById, state, labelFn) {
 }
 
 export function buildPeriodique(state, f, subtitle) {
-  const gran = f.gran || 'mois';
-  const from = f.from || `${new Date().getFullYear()}-01-01`;
-  const to = f.to || todayISO();
+  const periode = periodeDuRapport(state, f);
+  const gran = granulariteTableau(periode);
+  const from = periode.from || `${new Date().getFullYear()}-01-01`;
+  const to = periode.to || todayISO();
   const inscriptions = scopeInscriptions(state, { yearId: f.yearId, classId: f.classId, category: f.category });
-  const byId = new Map(inscriptions.map((i) => [i.id, i]));
-  const allPayments = state.paiements.filter((p) => !p.annule && byId.has(p.inscriptionId));
+  // Toutes les inscriptions (une dette antérieure réglée cette année porte sur une inscription d'une autre année)
+  const byId = new Map(state.inscriptions.map((i) => [i.id, i]));
+  const allPayments = recettesFiltrees(state, { yearId: f.yearId, classId: f.classId, category: f.category });
   const payments = allPayments.filter((p) => inRange(p.datePaiement, from, to));
   const sits = inscriptions.map((i) => inscriptionSituation(state, i));
   const attendu = sits.reduce((s, x) => s + x.total, 0);
@@ -155,8 +159,8 @@ export function buildPeriodique(state, f, subtitle) {
   ];
 
   return {
-    title: `Rapport financier ${GRANULARITES.find((g) => g.id === gran).label.toLowerCase()}`,
-    subtitle: `${subtitle} · Période : ${formatDateFr(from)} → ${formatDateFr(to)}`,
+    title: `Rapport financier ${(PERIODICITES.find(([k]) => k === periode.gran)?.[1] || '').toLowerCase()}`,
+    subtitle: `${subtitle} · ${periode.libelle}`,
     kpis: [['Frais attendus', attendu, true], ['Encaissé sur la période', encaissePeriode, true], ['Reste à payer (cumul)', Math.max(attendu - encaisseTotal, 0), true], ['Taux de recouvrement', pct(encaisseTotal, attendu)],
       ['Paiements sur la période', stats.count], ['Paiement moyen', stats.moyenne, true], ['Plus gros paiement', stats.max, true], ['Élèves payeurs', stats.payeurs],
       ['Jours avec encaissement', stats.joursActifs], ['Moyenne par jour encaissé', stats.moyenneJour, true],

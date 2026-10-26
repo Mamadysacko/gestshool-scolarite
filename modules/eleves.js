@@ -1,8 +1,14 @@
 import { nextId } from './annees.js';
+import { exiger } from './auth.js';
+
+// Matricule automatique : SIGLE-AAAA-NNNN (sigle de l'établissement, « MAT » s'il n'est pas défini)
+export function prefixeMatricule(state) {
+  return String(state.config?.sigle || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || 'MAT';
+}
 
 function generateMatricule(state) {
   const year = new Date().getFullYear();
-  const prefix = `IBK-${year}-`;
+  const prefix = `${prefixeMatricule(state)}-${year}-`;
   const existing = state.eleves
     .map((eleve) => eleve.matricule || '')
     .filter((m) => m.startsWith(prefix))
@@ -13,6 +19,7 @@ function generateMatricule(state) {
 }
 
 export function createEleve(state, payload = {}) {
+  exiger('eleves.gerer');
   const nom = String(payload.nom || '').trim();
   const prenom = String(payload.prenom || '').trim();
   if (!nom || !prenom) return null;
@@ -37,6 +44,7 @@ export function createEleve(state, payload = {}) {
 }
 
 export function updateEleve(state, id, payload = {}) {
+  exiger('eleves.gerer');
   const item = state.eleves.find((eleve) => eleve.id === Number(id));
   if (!item) return null;
   const nom = String(payload.nom ?? item.nom).trim();
@@ -58,6 +66,7 @@ export function updateEleve(state, id, payload = {}) {
 }
 
 export function toggleEleveState(state, id) {
+  exiger('eleves.gerer');
   const item = state.eleves.find((eleve) => eleve.id === Number(id));
   if (!item) return null;
   item.actif = !item.actif;
@@ -66,6 +75,7 @@ export function toggleEleveState(state, id) {
 
 // Refus si un paiement existe pour l'élève : l'historique comptable est conservé.
 export function deleteEleve(state, id) {
+  exiger('eleves.gerer');
   const targetId = Number(id);
   const index = state.eleves.findIndex((item) => item.id === targetId);
   if (index === -1) return false;
